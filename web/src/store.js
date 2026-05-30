@@ -1,4 +1,8 @@
 import { reactive } from 'vue'
+import { ZonasService } from './service/zonas'
+import { MesasService } from './service/mesas'
+import { ElementosService } from './service/elementos'
+import { supabase } from './config/supabase'
 
 export const store = reactive({
   role: null, // 'admin', 'waiter', null
@@ -89,24 +93,106 @@ export const store = reactive({
   async loadTopology() {
     if (this.isLoaded) return;
     try {
-      const res = await fetch('/api/topology');
-      if (res.ok) {
-        const data = await res.json();
-        this.rooms = data.rooms || [];
-        this.tableCounter = data.tableCounter || 1;
-        this.elementCounter = data.elementCounter || 1;
-        if (this.rooms.length > 0 && !this.activeRoomId) {
-          this.activeRoomId = this.rooms[0].id;
-        }
-        this.isLoaded = true;
+      // Cargar zonas, mesas y elementos desde Supabase
+      const zonas = await ZonasService.getAll();
+      const mesas = await MesasService.getAll();
+      const elementos = await ElementosService.getAll();
+
+      // Mapear los datos de Supabase al formato que espera el frontend
+      const mappedRooms = zonas.map(zona => {
+        const zonaMesas = mesas.filter(m => m.zona_id === zona.id).map(m => ({
+          id: m.id,
+          number: m.numero_mesa,
+          capacity: m.capacidad_nominal,
+          state: (m.estado || 'disponible').toLowerCase(),
+          x: Number(m.posicion_x),
+          y: Number(m.posicion_y),
+          lockedUntil: m.bloqueada_hasta ? new Date(m.bloqueada_hasta).getTime() : null,
+          lockedBy: m.bloqueada_por || null
+        }));
+
+        const zonaElementos = elementos.filter(e => e.zona_id === zona.id).map(e => ({
+          id: e.id,
+          type: e.type,
+          x: Number(e.x),
+          y: Number(e.y),
+          width: Number(e.width),
+          height: Number(e.height),
+          rotation: Number(e.rotation)
+        }));
+
+        return {
+          id: zona.id,
+          name: zona.nombre,
+          tables: zonaMesas,
+          elements: zonaElementos
+        };
+      });
+
+      this.rooms = mappedRooms;
+
+      // Calcular tableCounter y elementCounter
+      let maxTableNumber = 0;
+      mesas.forEach(m => {
+        if (m.numero_mesa > maxTableNumber) maxTableNumber = m.numero_mesa;
+      });
+      this.tableCounter = maxTableNumber + 1;
+      this.elementCounter = elementos.length + 1;
+
+      if (this.rooms.length > 0 && !this.activeRoomId) {
+        this.activeRoomId = this.rooms[0].id;
       }
+      this.isLoaded = true;
     } catch (e) {
-      console.error('Failed to load topology from mock API', e);
+      console.error('Failed to load topology from Supabase', e);
     }
   },
 
   async saveTopology() {
     try {
+      // Guardar el estado completo de la topología en Supabase (upsert)
+      
+      for (const room of this.rooms) {
+        // Upsert zona
+        await supabase.from('zonas').upsert({
+          id: room.id,
+          nombre: room.name,
+          activa: true
+        });
+
+        // Upsert mesas de esta zona
+        if (room.tables && room.tables.length > 0) {
+          const mesasToUpsert = room.tables.map(t => ({
+            id: t.id,
+            zona_id: room.id,
+            numero_mesa: t.number,
+            capacidad_nominal: t.capacity,
+            estado: t.state === 'disponible' ? 'Disponible' : t.state,
+            posicion_x: t.x,
+            posicion_y: t.y,
+            forma: 'cuadrada',
+            rotacion: 0
+          }));
+          await supabase.from('mesas').upsert(mesasToUpsert);
+        }
+
+        // Upsert elementos de esta zona
+        if (room.elements && room.elements.length > 0) {
+          const elementosToUpsert = room.elements.map(e => ({
+            id: e.id,
+            zona_id: room.id,
+            type: e.type,
+            x: e.x,
+            y: e.y,
+            width: e.width,
+            height: e.height,
+            rotation: e.rotation
+          }));
+          await supabase.from('elementos_topologia').upsert(elementosToUpsert);
+        }
+      }
+
+      // También actualizamos el mock para la persistencia de contadores por ahora si es necesario
       await fetch('/api/topology', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -116,8 +202,9 @@ export const store = reactive({
           elementCounter: this.elementCounter
         })
       });
+
     } catch (e) {
-      console.error('Failed to save topology to mock API', e);
+      console.error('Failed to save topology to Supabase', e);
     }
   }
 })
