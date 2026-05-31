@@ -192,17 +192,6 @@ export const store = reactive({
         }
       }
 
-      // También actualizamos el mock para la persistencia de contadores por ahora si es necesario
-      await fetch('/api/topology', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          rooms: this.rooms,
-          tableCounter: this.tableCounter,
-          elementCounter: this.elementCounter
-        })
-      });
-
     } catch (e) {
       console.error('Failed to save topology to Supabase', e);
     }

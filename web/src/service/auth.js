@@ -1,4 +1,4 @@
-import { supabase } from '../config/supabase';
+import { supabase } from "../config/supabase";
 
 export const AuthService = {
   async login(identifier, password) {
@@ -7,9 +7,9 @@ export const AuthService = {
     let loginEmail = identifier;
     let loginPassword = password;
 
-    if (loginEmail === 'admin' && loginPassword === 'admin') {
-      loginEmail = 'admin@admin.com';
-      loginPassword = 'adminadmin';
+    if (loginEmail === "admin" && loginPassword === "admin") {
+      loginEmail = "admin@admin.com";
+      loginPassword = "adminadmin";
     }
 
     const { data, error } = await supabase.auth.signInWithPassword({
@@ -30,8 +30,11 @@ export const AuthService = {
   },
 
   async getCurrentUser() {
-    const { data: { user }, error } = await supabase.auth.getUser();
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser();
     if (error) throw error;
     return user;
-  }
+  },
 };

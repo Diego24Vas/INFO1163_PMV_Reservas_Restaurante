@@ -74,11 +74,16 @@ const centerView = () => {
 
 const isDirty = ref(false)
 const isSaving = ref(false)
+let saveTimeout = null
 
-// Watch changes to topology to mark as dirty
+// Watch changes to topology to auto-save
 watch(() => store.rooms, () => {
   if (store.isLoaded) {
     isDirty.value = true
+    if (saveTimeout) clearTimeout(saveTimeout)
+    saveTimeout = setTimeout(() => {
+      saveChanges()
+    }, 1000)
   }
 }, { deep: true })
 
@@ -447,11 +452,6 @@ const handleMouseUp = () => {
               <!-- Añadir Mesa -->
               <button @click="openTableDialog" class="px-3 md:px-4 py-2 text-xs md:text-sm font-medium text-white bg-neutral-900 hover:bg-neutral-800 rounded-lg transition-colors shadow-sm flex items-center gap-2 shrink-0">
                 <Plus :stroke-width="1.5" class="w-4 h-4" /> Mesa
-              </button>
-              
-              <!-- Guardar Topología -->
-              <button @click="store.saveTopology" class="px-3 md:px-4 py-2 text-xs md:text-sm font-medium text-neutral-700 bg-white hover:bg-neutral-50 border border-neutral-200 rounded-lg transition-colors shadow-sm flex items-center gap-2 shrink-0">
-                <Save :stroke-width="1.5" class="w-4 h-4" /> Guardar
               </button>
             </div>
           </header>
