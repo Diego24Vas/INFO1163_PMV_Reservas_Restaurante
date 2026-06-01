@@ -21,20 +21,39 @@ const handleLogin = async () => {
   errorMessage.value = ''
   
   try {
-    const data = await AuthService.login(identifier.value, password.value)
+    // Recibimos los datos y el rol desde el servicio actualizado
+    const { sessionData, roleName, perfil } = await AuthService.login(identifier.value, password.value)
 
-    // Por ahora, asumimos que si logueó con admin@admin.com es admin.
-    // Podríamos leer el role desde una tabla de perfiles en el futuro.
-    if (data.user) {
-      store.role = 'admin'
+    if (sessionData.user) {
+      // Limpiamos los estados operativos previos
       store.activeTable = null
-      store.activeWaiterId = null
-      router.push('/admin')
+      
+      // Enrutamiento basado en Roles de Base de Datos
+      if (roleName === 'Administrador') {
+        store.role = 'admin'
+        store.activeWaiterId = null
+        router.push('/admin')
+      } 
+      else if (roleName === 'Camarero') {
+        store.role = 'waiter'
+        // Guardamos el ID del camarero logueado para registrar sesiones/pedidos en la BD
+        store.activeWaiterId = sessionData.user.id
+        // Opcional: podrías guardar el nombre para mostrarlo en la UI
+        store.activeWaiterName = `${perfil.nombre} ${perfil.apellidos}` 
+        
+        router.push('/waiter')
+      } 
+      else {
+        // Fallback de seguridad en caso de que un rol no tenga vista asignada
+        await AuthService.logout()
+        errorMessage.value = 'Tu rol no tiene acceso a esta aplicación.'
+      }
     }
 
   } catch (error) {
     console.error('Error de autenticación:', error.message)
-    errorMessage.value = 'Credenciales inválidas. Por favor, intente nuevamente.'
+    // Mensaje más amigable o usar el error exacto (error.message)
+    errorMessage.value = error.message || 'Credenciales inválidas. Por favor, intente nuevamente.'
   } finally {
     isLoading.value = false
   }
