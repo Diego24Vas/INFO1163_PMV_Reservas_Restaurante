@@ -50,4 +50,39 @@ export const PerfilesService = {
     if (error) throw error;
     return data;
   },
+
+  // --- NUEVAS FUNCIONES ---
+
+  /**
+   * Consulta la tabla de roles y devuelve el ID del rol 'Camarero'
+   */
+  async getRolCamareroId() {
+    const { data, error } = await supabase
+      .from("roles")
+      .select("id")
+      .eq("nombre", "Camarero")
+      .single();
+
+    if (error) throw error;
+    return data.id;
+  },
+
+  /**
+   * Obtiene todos los perfiles cruzando datos con la tabla roles 
+   * para traer únicamente los que tienen el rol 'Camarero'
+   */
+  async getWaiters() {
+    const { data, error } = await supabase
+      .from(TABLE_NAME)
+      .select(`
+        *,
+        roles!inner(
+          nombre
+        )
+      `)
+      .eq("roles.nombre", "Camarero");
+
+    if (error) throw error;
+    return data;
+  }
 };
