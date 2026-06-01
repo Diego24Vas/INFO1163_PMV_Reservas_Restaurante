@@ -2,6 +2,7 @@
 import { useRouter } from 'vue-router'
 import { store } from '../store'
 import { UtensilsCrossed, LogOut } from 'lucide-vue-next'
+import { AuthService } from '../service/auth'
 
 const props = defineProps({
   roleName: {
@@ -12,9 +13,15 @@ const props = defineProps({
 
 const router = useRouter()
 
-const logout = () => {
-  store.role = null
-  router.push('/')
+const logout = async () => {
+  try {
+    await AuthService.logout()
+    store.role = null
+    store.activeWaiterId = null
+    router.push('/')
+  } catch (error) {
+    console.error("Error al cerrar sesión:", error)
+  }
 }
 </script>
 
