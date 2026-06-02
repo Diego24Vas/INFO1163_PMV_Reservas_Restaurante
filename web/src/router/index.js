@@ -69,27 +69,38 @@ router.beforeEach(async (to, from, next) => {
   }
 
   if (user) {
-    const { data: perfilData } = await supabase
-      .from('perfiles')
-      .select('roles!inner(nombre)')
-      .eq('id', user.id)
-      .single()
+    // Intentar restaurar store.role desde la DB (persiste tras recarga de página)
+    // pero no bloquear la navegación si falla la consulta
+    try {
+      const { data: perfilData, error: perfilError } = await supabase
+        .from('perfiles')
+        .select('roles!inner(nombre)')
+        .eq('id', user.id)
+        .single()
 
-    const userRole = perfilData?.roles?.nombre
+      if (!perfilError && perfilData?.roles?.nombre) {
+        const userRole = perfilData.roles.nombre
 
-    if (requiresGuest) {
-      if (userRole === 'Administrador') return next('/admin')
-      if (userRole === 'Camarero') return next('/waiter')
-    }
+        if (userRole === 'Administrador') store.role = 'admin'
+        else if (userRole === 'Camarero') store.role = 'waiter'
 
-    if (requiresAuth && to.meta.role) {
-      if (to.meta.role === 'Administrador' && userRole !== 'Administrador') {
-        return next('/waiter')
+        if (requiresGuest) {
+          if (userRole === 'Administrador') return next('/admin')
+          if (userRole === 'Camarero') return next('/waiter')
+        }
+
+        if (requiresAuth && to.meta.role) {
+          if (to.meta.role === 'Administrador' && userRole !== 'Administrador') {
+            return next('/waiter')
+          }
+          
+          if (to.meta.role === 'Camarero' && userRole !== 'Camarero') {
+            return next('/admin')
+          }
+        }
       }
-      
-      if (to.meta.role === 'Camarero' && userRole !== 'Camarero') {
-        return next('/admin')
-      }
+    } catch (e) {
+      console.warn('No se pudo verificar el rol en DB, usando store.role', e)
     }
   }
 

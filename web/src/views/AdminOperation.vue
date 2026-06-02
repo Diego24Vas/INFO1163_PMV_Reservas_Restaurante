@@ -30,7 +30,7 @@ onMounted(async () => {
   
   // Poll para mantener sincronización (cada 2 segundos)
   pollInterval = setInterval(async () => {
-    await store.loadTopology()
+    await store.loadTopology(true)
   }, 2000)
   
   // Loop de comprobación de tiempos (solo lectura para visualización)

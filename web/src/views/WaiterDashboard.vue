@@ -62,7 +62,7 @@ onMounted(async () => {
   
   // Poll para mantener sincronización entre camareros (cada 2 segundos)
   pollInterval = setInterval(async () => {
-    await store.loadTopology()
+    await store.loadTopology(true)
   }, 2000)
   
   // Loop de comprobación de locks y alertas (cada segundo)
@@ -344,8 +344,7 @@ const changeTableState = async (newState, guests = null) => {
   if (newState === 'asignacion') {
     if (currentTable.state === 'asignacion' && currentTable.lockedBy && currentTable.lockedBy !== store.activeWaiterId) {
       alert('Esta mesa fue bloqueada por otro camarero. Por favor espera a que se libere.')
-      // Recargar datos para mostrar el estado actualizado
-      await store.loadTopology()
+      await store.loadTopology(true)
       isActionDialogOpen.value = false
       return
     }
@@ -355,7 +354,7 @@ const changeTableState = async (newState, guests = null) => {
   if (newState === 'ocupada') {
     if (currentTable.state === 'asignacion' && currentTable.lockedBy && currentTable.lockedBy !== store.activeWaiterId) {
       alert('El tiempo de asignación expiró o fue tomada por otro camarero.')
-      await store.loadTopology()
+      await store.loadTopology(true)
       isActionDialogOpen.value = false
       return
     }

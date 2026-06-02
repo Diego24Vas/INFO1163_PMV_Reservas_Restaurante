@@ -4,6 +4,21 @@ import { MesasService } from './service/mesas'
 import { ElementosService } from './service/elementos'
 import { supabase } from './config/supabase'
 
+const dbToFrontendState = {
+  'Disponible': 'disponible',
+  'En Asignacion': 'asignacion',
+  'Ocupada': 'ocupada',
+  'Requiere Limpieza': 'sucia',
+  'Inactividad Ambar': 'disponible'
+}
+
+const frontendToDbState = {
+  'disponible': 'Disponible',
+  'asignacion': 'En Asignacion',
+  'ocupada': 'Ocupada',
+  'sucia': 'Requiere Limpieza'
+}
+
 export const store = reactive({
   role: null, // 'admin', 'waiter', null
   rooms: [],
@@ -90,9 +105,15 @@ export const store = reactive({
     }
   },
 
-  async loadTopology() {
-    if (this.isLoaded) return;
+  async loadTopology(force = false) {
+    if (this.isLoaded && !force) return;
     try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        this.isLoaded = false
+        return
+      }
+
       // Cargar zonas, mesas y elementos desde Supabase
       const zonas = await ZonasService.getAll();
       const mesas = await MesasService.getAll();
@@ -104,11 +125,15 @@ export const store = reactive({
           id: m.id,
           number: m.numero_mesa,
           capacity: m.capacidad_nominal,
-          state: (m.estado || 'disponible').toLowerCase(),
+          state: dbToFrontendState[m.estado] || 'disponible',
           x: Number(m.posicion_x),
           y: Number(m.posicion_y),
           lockedUntil: m.bloqueada_hasta ? new Date(m.bloqueada_hasta).getTime() : null,
-          lockedBy: m.bloqueada_por || null
+          lockedBy: m.bloqueada_por || null,
+          stateUpdatedAt: m.ultimo_cambio_estado ? new Date(m.ultimo_cambio_estado).getTime() : null,
+          assignedTo: m.asignado_a || null,
+          guests: m.comensales || null,
+          mergeGroup: m.grupo_fusion || null
         }));
 
         const zonaElementos = elementos.filter(e => e.zona_id === zona.id).map(e => ({
@@ -124,6 +149,8 @@ export const store = reactive({
         return {
           id: zona.id,
           name: zona.nombre,
+          colorReferencia: zona.color_referencia || null,
+          ordenVisual: zona.orden_visual || 0,
           tables: zonaMesas,
           elements: zonaElementos
         };
@@ -149,34 +176,61 @@ export const store = reactive({
   },
 
   async saveTopology() {
+    if (!this.isLoaded) return
     try {
-      // Guardar el estado completo de la topología en Supabase (upsert)
-      
+      const { data: dbZonas } = await supabase.from('zonas').select('id');
+      const { data: dbMesas } = await supabase.from('mesas').select('id, zona_id');
+      const { data: dbElementos } = await supabase.from('elementos_topologia').select('id, zona_id');
+
+      const currentRoomIds = this.rooms.map(r => r.id);
+      const currentTableIds = this.rooms.flatMap(r => (r.tables || []).map(t => t.id));
+      const currentElementIds = this.rooms.flatMap(r => (r.elements || []).map(e => e.id));
+
+      const zonasToDelete = (dbZonas || []).filter(z => !currentRoomIds.includes(z.id)).map(z => z.id);
+      if (zonasToDelete.length > 0) {
+        await supabase.from('zonas').delete().in('id', zonasToDelete);
+      }
+
+      const mesasToDelete = (dbMesas || []).filter(m => !currentTableIds.includes(m.id)).map(m => m.id);
+      if (mesasToDelete.length > 0) {
+        await supabase.from('mesas').delete().in('id', mesasToDelete);
+      }
+
+      const elementosToDelete = (dbElementos || []).filter(e => !currentElementIds.includes(e.id)).map(e => e.id);
+      if (elementosToDelete.length > 0) {
+        await supabase.from('elementos_topologia').delete().in('id', elementosToDelete);
+      }
+
       for (const room of this.rooms) {
-        // Upsert zona
         await supabase.from('zonas').upsert({
           id: room.id,
           nombre: room.name,
+          color_referencia: room.colorReferencia || null,
+          orden_visual: room.ordenVisual || 0,
           activa: true
         });
 
-        // Upsert mesas de esta zona
         if (room.tables && room.tables.length > 0) {
           const mesasToUpsert = room.tables.map(t => ({
             id: t.id,
             zona_id: room.id,
             numero_mesa: t.number,
             capacidad_nominal: t.capacity,
-            estado: t.state === 'disponible' ? 'Disponible' : t.state,
+            estado: frontendToDbState[t.state] || 'Disponible',
             posicion_x: t.x,
             posicion_y: t.y,
             forma: 'cuadrada',
-            rotacion: 0
+            rotacion: 0,
+            bloqueada_hasta: t.lockedUntil ? new Date(t.lockedUntil).toISOString() : null,
+            bloqueada_por: t.lockedBy || null,
+            ultimo_cambio_estado: t.stateUpdatedAt ? new Date(t.stateUpdatedAt).toISOString() : null,
+            asignado_a: t.assignedTo || null,
+            comensales: t.guests || null,
+            grupo_fusion: t.mergeGroup || null
           }));
           await supabase.from('mesas').upsert(mesasToUpsert);
         }
 
-        // Upsert elementos de esta zona
         if (room.elements && room.elements.length > 0) {
           const elementosToUpsert = room.elements.map(e => ({
             id: e.id,

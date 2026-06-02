@@ -80,7 +80,7 @@ export const PerfilesService = {
           nombre
         )
       `)
-      .eq("roles.nombre", "Camarero");
+      .filter("roles.nombre", "eq", "Camarero");
 
     if (error) throw error;
     return data;

@@ -4,7 +4,6 @@ import { RouterView } from 'vue-router'
 import { store } from './store'
 
 onMounted(() => {
-  store.loadTopology()
   store.loadStaff()
   store.loadHistory()
 })

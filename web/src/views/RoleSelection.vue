@@ -12,8 +12,9 @@ const rememberMe = ref(false)
 const isLoading = ref(false)
 const errorMessage = ref('')
 
-onMounted(async () => {
-  await store.loadTopology()
+onMounted(() => {
+  // No cargar topología aquí: el usuario aún no está autenticado
+  // y las políticas RLS de Supabase bloquean las consultas anon.
 })
 
 const handleLogin = async () => {
@@ -21,8 +22,14 @@ const handleLogin = async () => {
   errorMessage.value = ''
   
   try {
+    // Formatear el identificador a email si es necesario
+    let email = identifier.value.trim()
+    if (email.toLowerCase() === 'admin') email = 'admin@restaurante.com'
+    else if (email.toLowerCase() === 'camarero') email = 'camarero@restaurante.com'
+    else if (!email.includes('@')) email = `${email}@restaurante.com`
+
     // Recibimos los datos y el rol desde el servicio actualizado
-    const { sessionData, roleName, perfil } = await AuthService.login(identifier.value, password.value)
+    const { sessionData, roleName, perfil } = await AuthService.login(email, password.value)
 
     if (sessionData.user) {
       // Limpiamos los estados operativos previos

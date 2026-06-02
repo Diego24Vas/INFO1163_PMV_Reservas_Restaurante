@@ -75,10 +75,12 @@ const centerView = () => {
 const isDirty = ref(false)
 const isSaving = ref(false)
 let saveTimeout = null
+let saveVersion = 0
 
 // Watch changes to topology to auto-save
 watch(() => store.rooms, () => {
   if (store.isLoaded) {
+    saveVersion++
     isDirty.value = true
     if (saveTimeout) clearTimeout(saveTimeout)
     saveTimeout = setTimeout(() => {
@@ -89,9 +91,12 @@ watch(() => store.rooms, () => {
 
 const saveChanges = async () => {
   if (!isDirty.value) return
+  const versionAtStart = saveVersion
   isSaving.value = true
   await store.saveTopology()
-  isDirty.value = false
+  if (saveVersion === versionAtStart) {
+    isDirty.value = false
+  }
   isSaving.value = false
 }
 
@@ -112,6 +117,13 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  if (saveTimeout) {
+    clearTimeout(saveTimeout)
+    saveTimeout = null
+  }
+  if (isDirty.value) {
+    store.saveTopology()
+  }
   window.removeEventListener('mouseup', handleMouseUp)
   window.removeEventListener('mousemove', handleMouseMove)
 })
