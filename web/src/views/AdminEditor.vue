@@ -74,11 +74,16 @@ const centerView = () => {
 
 const isDirty = ref(false)
 const isSaving = ref(false)
+let saveTimeout = null
 
-// Watch changes to topology to mark as dirty
+// Watch changes to topology to auto-save
 watch(() => store.rooms, () => {
   if (store.isLoaded) {
     isDirty.value = true
+    if (saveTimeout) clearTimeout(saveTimeout)
+    saveTimeout = setTimeout(() => {
+      saveChanges()
+    }, 1000)
   }
 }, { deep: true })
 
@@ -146,7 +151,7 @@ const openRoomDialog = () => {
 
 const confirmAddRoom = () => {
   if (newRoomName.value && newRoomName.value.trim() !== '') {
-    const newId = 'room_' + Date.now()
+    const newId = crypto.randomUUID()
     store.rooms.push({ id: newId, name: newRoomName.value.trim(), tables: [], elements: [] })
     store.activeRoomId = newId
     isRoomDialogOpen.value = false
@@ -185,12 +190,12 @@ const confirmAddTable = () => {
     const centerY = canvasContainer.value ? (canvasContainer.value.scrollTop + canvasContainer.value.clientHeight / 2) / zoomLevel.value : 1500
     
     activeRoom.value.tables.push({
-      id: 't_' + Date.now(),
+      id: crypto.randomUUID(),
       number: store.tableCounter++,
       capacity: parseInt(newTableCapacity.value),
       state: 'disponible',
-      x: centerX - 40,
-      y: centerY - 40
+      x: Math.round(centerX - 40),
+      y: Math.round(centerY - 40)
     })
     isTableDialogOpen.value = false
   }
@@ -207,10 +212,10 @@ const addElement = (type) => {
     const centerY = canvasContainer.value ? (canvasContainer.value.scrollTop + canvasContainer.value.clientHeight / 2) / zoomLevel.value : 1500
 
     activeRoom.value.elements.push({
-      id: 'e_' + Date.now(),
+      id: crypto.randomUUID(),
       type: type, 
-      x: centerX - w/2,
-      y: centerY - h/2,
+      x: Math.round(centerX - w/2),
+      y: Math.round(centerY - h/2),
       width: w,
       height: h,
       rotation: 0
@@ -278,7 +283,7 @@ const duplicateItem = () => {
     if (selectedItemType.value === 'table') {
       const newItem = {
         ...selectedItem.value,
-        id: 't_' + Date.now(),
+        id: crypto.randomUUID(),
         number: store.tableCounter++,
         x: selectedItem.value.x + 40,
         y: selectedItem.value.y + 40
@@ -288,7 +293,7 @@ const duplicateItem = () => {
     } else {
       const newItem = {
         ...selectedItem.value,
-        id: 'e_' + Date.now(),
+        id: crypto.randomUUID(),
         x: selectedItem.value.x + 40,
         y: selectedItem.value.y + 40
       }
@@ -447,11 +452,6 @@ const handleMouseUp = () => {
               <!-- Añadir Mesa -->
               <button @click="openTableDialog" class="px-3 md:px-4 py-2 text-xs md:text-sm font-medium text-white bg-neutral-900 hover:bg-neutral-800 rounded-lg transition-colors shadow-sm flex items-center gap-2 shrink-0">
                 <Plus :stroke-width="1.5" class="w-4 h-4" /> Mesa
-              </button>
-              
-              <!-- Guardar Topología -->
-              <button @click="store.saveTopology" class="px-3 md:px-4 py-2 text-xs md:text-sm font-medium text-neutral-700 bg-white hover:bg-neutral-50 border border-neutral-200 rounded-lg transition-colors shadow-sm flex items-center gap-2 shrink-0">
-                <Save :stroke-width="1.5" class="w-4 h-4" /> Guardar
               </button>
             </div>
           </header>
