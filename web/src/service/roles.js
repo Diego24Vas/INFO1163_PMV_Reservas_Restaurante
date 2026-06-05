@@ -19,6 +19,16 @@ export const RolesService = {
     return data;
   },
 
+  async getByName(name) {
+    const { data, error } = await supabase
+      .from(TABLE_NAME)
+      .select("id")
+      .eq("nombre", name)
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  },
+
   async create(rol) {
     const { data, error } = await supabase
       .from(TABLE_NAME)

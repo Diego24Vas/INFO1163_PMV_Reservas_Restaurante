@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { supabase } from '../config/supabase'
+import { AuthService } from '../service/auth'
+import { store } from '../store'
 
 import RoleSelection from '../views/RoleSelection.vue'
 import AdminDashboard from '../views/AdminDashboard.vue'
@@ -57,9 +58,10 @@ const router = createRouter({
   ]
 })
 
-// === NAVIGATION GUARD DE SEGURIDAD ===
 router.beforeEach(async (to, from, next) => {
-  const { data: { user } } = await supabase.auth.getUser()
+  const session = AuthService.getStoredSession()
+  const user = session?.user
+  const userRole = session?.roleName
 
   const requiresAuth = to.matched.some(record => record.meta.requiresAuth)
   const requiresGuest = to.matched.some(record => record.meta.requiresGuest)
@@ -68,39 +70,22 @@ router.beforeEach(async (to, from, next) => {
     return next({ name: 'role-selection' })
   }
 
-  if (user) {
-    // Intentar restaurar store.role desde la DB (persiste tras recarga de página)
-    // pero no bloquear la navegación si falla la consulta
-    try {
-      const { data: perfilData, error: perfilError } = await supabase
-        .from('perfiles')
-        .select('roles!inner(nombre)')
-        .eq('id', user.id)
-        .single()
+  if (user && userRole) {
+    if (userRole === 'Administrador') store.role = 'admin'
+    else if (userRole === 'Camarero') store.role = 'waiter'
 
-      if (!perfilError && perfilData?.roles?.nombre) {
-        const userRole = perfilData.roles.nombre
+    if (requiresGuest) {
+      if (userRole === 'Administrador') return next('/admin')
+      if (userRole === 'Camarero') return next('/waiter')
+    }
 
-        if (userRole === 'Administrador') store.role = 'admin'
-        else if (userRole === 'Camarero') store.role = 'waiter'
-
-        if (requiresGuest) {
-          if (userRole === 'Administrador') return next('/admin')
-          if (userRole === 'Camarero') return next('/waiter')
-        }
-
-        if (requiresAuth && to.meta.role) {
-          if (to.meta.role === 'Administrador' && userRole !== 'Administrador') {
-            return next('/waiter')
-          }
-          
-          if (to.meta.role === 'Camarero' && userRole !== 'Camarero') {
-            return next('/admin')
-          }
-        }
+    if (requiresAuth && to.meta.role) {
+      if (to.meta.role === 'Administrador' && userRole !== 'Administrador') {
+        return next('/waiter')
       }
-    } catch (e) {
-      console.warn('No se pudo verificar el rol en DB, usando store.role', e)
+      if (to.meta.role === 'Camarero' && userRole !== 'Camarero') {
+        return next('/admin')
+      }
     }
   }
 

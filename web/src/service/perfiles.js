@@ -1,10 +1,13 @@
 import { supabase } from "../config/supabase";
+import { RolesService } from "./roles";
 
 const TABLE_NAME = "perfiles";
 
 export const PerfilesService = {
   async getAll() {
-    const { data, error } = await supabase.from(TABLE_NAME).select("*");
+    const { data, error } = await supabase
+      .from(TABLE_NAME)
+      .select("id, nombre, apellidos, email, rol_id, creado_en");
     if (error) throw error;
     return data;
   },
@@ -12,7 +15,7 @@ export const PerfilesService = {
   async getById(id) {
     const { data, error } = await supabase
       .from(TABLE_NAME)
-      .select("*")
+      .select("id, nombre, apellidos, email, rol_id, creado_en")
       .eq("id", id)
       .single();
     if (error) throw error;
@@ -23,7 +26,7 @@ export const PerfilesService = {
     const { data, error } = await supabase
       .from(TABLE_NAME)
       .insert(perfil)
-      .select()
+      .select("id, nombre, apellidos, email, rol_id, creado_en")
       .single();
     if (error) throw error;
     return data;
@@ -34,7 +37,7 @@ export const PerfilesService = {
       .from(TABLE_NAME)
       .update(updates)
       .eq("id", id)
-      .select()
+      .select("id, nombre, apellidos, email, rol_id, creado_en")
       .single();
     if (error) throw error;
     return data;
@@ -45,37 +48,29 @@ export const PerfilesService = {
       .from(TABLE_NAME)
       .delete()
       .eq("id", id)
-      .select()
+      .select("id")
       .single();
     if (error) throw error;
     return data;
   },
 
-  // --- NUEVAS FUNCIONES ---
-
-  /**
-   * Consulta la tabla de roles y devuelve el ID del rol 'Camarero'
-   */
   async getRolCamareroId() {
-    const { data, error } = await supabase
-      .from("roles")
-      .select("id")
-      .eq("nombre", "Camarero")
-      .single();
-
-    if (error) throw error;
-    return data.id;
+    const role = await RolesService.getByName('Camarero');
+    if (!role) {
+      throw new Error('El rol "Camarero" no existe en la base de datos. Ejecuta el seed.sql para crearlo.');
+    }
+    return role.id;
   },
 
-  /**
-   * Obtiene todos los perfiles cruzando datos con la tabla roles 
-   * para traer únicamente los que tienen el rol 'Camarero'
-   */
   async getWaiters() {
     const { data, error } = await supabase
       .from(TABLE_NAME)
       .select(`
-        *,
+        id,
+        nombre,
+        apellidos,
+        email,
+        creado_en,
         roles!inner(
           nombre
         )

@@ -58,7 +58,7 @@ onMounted(async () => {
     router.push('/')
     return
   }
-  if (!store.isLoaded) await store.loadTopology()
+  await store.loadTopology(true)
   
   // Poll para mantener sincronización entre camareros (cada 2 segundos)
   pollInterval = setInterval(async () => {

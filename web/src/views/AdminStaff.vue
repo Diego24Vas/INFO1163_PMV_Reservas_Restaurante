@@ -1,26 +1,22 @@
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { store } from '../store' // Lo mantenemos solo para validar el rol (si lo necesitas)
+import { store } from '../store'
 import NavBar from '../components/NavBar.vue'
 import { Plus, ChevronLeft, Trash2, User } from 'lucide-vue-next'
 import Dialog from 'primevue/dialog'
 
-// Importar los servicios reales (ajusta la ruta según tu estructura de carpetas)
 import { PerfilesService } from '../service/perfiles'
 import { AuthService } from '../service/auth'
 
 const router = useRouter()
 
-// Estados de la UI
 const isAddWaiterDialogOpen = ref(false)
 const isSaving = ref(false)
 const isLoadingData = ref(true)
 
-// Estado de datos reales
 const waitersList = ref([])
 
-// Formulario reactivo para los 4 campos
 const form = reactive({
   nombre: '',
   apellidos: '',
@@ -28,7 +24,6 @@ const form = reactive({
   password: ''
 })
 
-// Función para cargar los camareros desde la DB
 const fetchWaiters = async () => {
   try {
     isLoadingData.value = true
@@ -42,11 +37,10 @@ const fetchWaiters = async () => {
 
 onMounted(async () => {
   if (store.role !== 'admin') router.push('/')
-  await fetchWaiters() // Obtenemos la lista real al montar el componente
+  await fetchWaiters()
 })
 
 const openAddDialog = () => {
-  // Limpiar el formulario al abrir
   form.nombre = ''
   form.apellidos = ''
   form.email = ''
@@ -54,7 +48,6 @@ const openAddDialog = () => {
   isAddWaiterDialogOpen.value = true
 }
 
-// Validación computada para deshabilitar el botón de guardado si faltan datos
 const isFormValid = computed(() => {
   return form.nombre.trim() && form.apellidos.trim() && form.email.trim() && form.password.trim()
 })
@@ -65,10 +58,8 @@ const confirmAddWaiter = async () => {
   try {
     isSaving.value = true
 
-    // 1. Obtener el ID del rol 'Camarero'
     const rolCamareroId = await PerfilesService.getRolCamareroId()
 
-    // 2. Crear el usuario en auth y el perfil, pasando todos los parámetros
     await AuthService.createStaffMember({
       email: form.email.trim(),
       password: form.password.trim(),
@@ -77,7 +68,6 @@ const confirmAddWaiter = async () => {
       rol_id: rolCamareroId
     })
 
-    // 3. Recargar la lista y cerrar modal si todo fue exitoso
     await fetchWaiters()
     isAddWaiterDialogOpen.value = false
 
@@ -89,8 +79,6 @@ const confirmAddWaiter = async () => {
   }
 }
 
-// Nota: Eliminar desde Auth requiere Edge Functions (service_role), 
-// por ahora dejamos el cascarón o puedes borrar solo el perfil si tu app lo permite.
 const removeWaiter = async (id) => {
   if(confirm("¿Estás seguro de que deseas eliminar este perfil?")) {
     try {

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { store } from '../store'
 import { AuthService } from '../service/auth'
@@ -12,30 +12,18 @@ const rememberMe = ref(false)
 const isLoading = ref(false)
 const errorMessage = ref('')
 
-onMounted(() => {
-  // No cargar topología aquí: el usuario aún no está autenticado
-  // y las políticas RLS de Supabase bloquean las consultas anon.
-})
-
 const handleLogin = async () => {
   isLoading.value = true
   errorMessage.value = ''
   
   try {
-    // Formatear el identificador a email si es necesario
-    let email = identifier.value.trim()
-    if (email.toLowerCase() === 'admin') email = 'admin@restaurante.com'
-    else if (email.toLowerCase() === 'camarero') email = 'camarero@restaurante.com'
-    else if (!email.includes('@')) email = `${email}@restaurante.com`
+    const email = identifier.value.trim()
 
-    // Recibimos los datos y el rol desde el servicio actualizado
     const { sessionData, roleName, perfil } = await AuthService.login(email, password.value)
 
     if (sessionData.user) {
-      // Limpiamos los estados operativos previos
       store.activeTable = null
       
-      // Enrutamiento basado en Roles de Base de Datos
       if (roleName === 'Administrador') {
         store.role = 'admin'
         store.activeWaiterId = null
@@ -43,15 +31,12 @@ const handleLogin = async () => {
       } 
       else if (roleName === 'Camarero') {
         store.role = 'waiter'
-        // Guardamos el ID del camarero logueado para registrar sesiones/pedidos en la BD
         store.activeWaiterId = sessionData.user.id
-        // Opcional: podrías guardar el nombre para mostrarlo en la UI
         store.activeWaiterName = `${perfil.nombre} ${perfil.apellidos}` 
         
         router.push('/waiter')
       } 
       else {
-        // Fallback de seguridad en caso de que un rol no tenga vista asignada
         await AuthService.logout()
         errorMessage.value = 'Tu rol no tiene acceso a esta aplicación.'
       }
@@ -59,7 +44,6 @@ const handleLogin = async () => {
 
   } catch (error) {
     console.error('Error de autenticación:', error.message)
-    // Mensaje más amigable o usar el error exacto (error.message)
     errorMessage.value = error.message || 'Credenciales inválidas. Por favor, intente nuevamente.'
   } finally {
     isLoading.value = false
@@ -79,7 +63,6 @@ const handleLogin = async () => {
         <p class="text-sm text-neutral-500 mt-2 text-center">Ingresa tus credenciales operativas</p>
       </div>
 
-      <!-- Alerta de Error -->
       <div v-if="errorMessage" class="mb-6 p-3 flex items-start gap-2.5 text-rose-600 bg-rose-50 border border-rose-100 rounded-lg animate-[fadeIn_0.2s_ease-out]">
         <AlertCircle :stroke-width="1.5" class="w-4 h-4 shrink-0 mt-0.5" />
         <p class="text-sm font-medium">{{ errorMessage }}</p>
@@ -88,12 +71,12 @@ const handleLogin = async () => {
       <form class="space-y-4" @submit.prevent="handleLogin">
         
         <div class="space-y-1.5">
-          <label for="identifier" class="block text-sm font-medium text-neutral-700">Usuario o ID de Empleado</label>
+          <label for="identifier" class="block text-sm font-medium text-neutral-700">Correo Electrónico</label>
           <div class="relative">
             <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-neutral-400">
               <User :stroke-width="1.5" class="w-4 h-4" />
             </div>
-            <input v-model="identifier" type="text" id="identifier" name="identifier" placeholder="ej. admin" required class="block w-full pl-9 pr-3 py-2 text-sm bg-white border border-neutral-200 rounded-lg text-neutral-900 placeholder-neutral-400 focus:outline-none focus:border-neutral-900 focus:ring-1 focus:ring-neutral-900 transition-shadow disabled:opacity-50 disabled:cursor-not-allowed" :disabled="isLoading">
+            <input v-model="identifier" type="email" id="identifier" name="identifier" placeholder="example@correo.com" required class="block w-full pl-9 pr-3 py-2 text-sm bg-white border border-neutral-200 rounded-lg text-neutral-900 placeholder-neutral-400 focus:outline-none focus:border-neutral-900 focus:ring-1 focus:ring-neutral-900 transition-shadow disabled:opacity-50 disabled:cursor-not-allowed" :disabled="isLoading">
           </div>
         </div>
 

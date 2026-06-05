@@ -108,18 +108,10 @@ export const store = reactive({
   async loadTopology(force = false) {
     if (this.isLoaded && !force) return;
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        this.isLoaded = false
-        return
-      }
-
-      // Cargar zonas, mesas y elementos desde Supabase
       const zonas = await ZonasService.getAll();
       const mesas = await MesasService.getAll();
       const elementos = await ElementosService.getAll();
 
-      // Mapear los datos de Supabase al formato que espera el frontend
       const mappedRooms = zonas.map(zona => {
         const zonaMesas = mesas.filter(m => m.zona_id === zona.id).map(m => ({
           id: m.id,
@@ -158,7 +150,6 @@ export const store = reactive({
 
       this.rooms = mappedRooms;
 
-      // Calcular tableCounter y elementCounter
       let maxTableNumber = 0;
       mesas.forEach(m => {
         if (m.numero_mesa > maxTableNumber) maxTableNumber = m.numero_mesa;

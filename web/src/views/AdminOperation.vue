@@ -25,7 +25,7 @@ onMounted(async () => {
     router.push('/')
     return
   }
-  if (!store.isLoaded) await store.loadTopology()
+  await store.loadTopology(true)
   if (!store.isStaffLoaded) await store.loadStaff()
   
   // Poll para mantener sincronización (cada 2 segundos)

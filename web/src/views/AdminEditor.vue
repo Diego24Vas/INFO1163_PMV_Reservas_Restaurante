@@ -102,8 +102,15 @@ const saveChanges = async () => {
 
 onMounted(async () => {
   if (store.role !== 'admin') router.push('/')
-  
-  await store.loadTopology()
+
+  // Always force-fetch fresh data from DB on mount
+  await store.loadTopology(true)
+
+  // Set activeRoomId if rooms exist but none selected
+  if (store.rooms.length > 0 && !store.activeRoomId) {
+    store.activeRoomId = store.rooms[0].id
+  }
+
   // Reset dirty flag after initial load
   setTimeout(() => isDirty.value = false, 100)
   
