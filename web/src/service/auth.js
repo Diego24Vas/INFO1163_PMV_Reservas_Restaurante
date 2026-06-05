@@ -86,4 +86,17 @@ export const AuthService = {
 
     return data[0];
   },
+
+  async updateStaffPassword(id, password) {
+    if (!id || !password) {
+      throw new Error("ID y contraseña son requeridos.");
+    }
+
+    const { error } = await supabase.rpc("update_perfil_password", {
+      p_id: id,
+      p_password: password,
+    });
+
+    if (error) throw error;
+  },
 };

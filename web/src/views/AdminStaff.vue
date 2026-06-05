@@ -3,7 +3,7 @@ import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { store } from '../store'
 import NavBar from '../components/NavBar.vue'
-import { Plus, ChevronLeft, Trash2, User } from 'lucide-vue-next'
+import { Plus, ChevronLeft, Trash2, Pencil, User } from 'lucide-vue-next'
 import Dialog from 'primevue/dialog'
 
 import { PerfilesService } from '../service/perfiles'
@@ -12,12 +12,21 @@ import { AuthService } from '../service/auth'
 const router = useRouter()
 
 const isAddWaiterDialogOpen = ref(false)
+const isEditWaiterDialogOpen = ref(false)
+const editingWaiter = ref(null)
 const isSaving = ref(false)
 const isLoadingData = ref(true)
 
 const waitersList = ref([])
 
 const form = reactive({
+  nombre: '',
+  apellidos: '',
+  email: '',
+  password: ''
+})
+
+const editForm = reactive({
   nombre: '',
   apellidos: '',
   email: '',
@@ -48,9 +57,51 @@ const openAddDialog = () => {
   isAddWaiterDialogOpen.value = true
 }
 
+const openEditDialog = (waiter) => {
+  editingWaiter.value = waiter
+  editForm.nombre = waiter.nombre || ''
+  editForm.apellidos = waiter.apellidos || ''
+  editForm.email = waiter.email || ''
+  editForm.password = ''
+  isEditWaiterDialogOpen.value = true
+}
+
 const isFormValid = computed(() => {
   return form.nombre.trim() && form.apellidos.trim() && form.email.trim() && form.password.trim()
 })
+
+const isEditFormValid = computed(() => {
+  return editForm.nombre.trim() && editForm.apellidos.trim() && editForm.email.trim()
+})
+
+const confirmEditWaiter = async () => {
+  if (!isEditFormValid.value || !editingWaiter.value) return
+
+  try {
+    isSaving.value = true
+
+    const updates = {
+      nombre: editForm.nombre.trim(),
+      apellidos: editForm.apellidos.trim(),
+      email: editForm.email.trim()
+    }
+
+    await PerfilesService.update(editingWaiter.value.id, updates)
+
+    if (editForm.password.trim()) {
+      await AuthService.updateStaffPassword(editingWaiter.value.id, editForm.password.trim())
+    }
+
+    await fetchWaiters()
+    isEditWaiterDialogOpen.value = false
+    editingWaiter.value = null
+  } catch (error) {
+    console.error('Error al actualizar el camarero:', error)
+    alert(error.message || 'Ocurrió un error al actualizar el camarero.')
+  } finally {
+    isSaving.value = false
+  }
+}
 
 const confirmAddWaiter = async () => {
   if (!isFormValid.value) return
@@ -128,9 +179,14 @@ const removeWaiter = async (id) => {
                 <span class="text-sm font-semibold tracking-tight text-neutral-900">{{ waiter.nombre }} {{ waiter.apellidos }}</span>
               </div>
             </div>
-            <button @click="removeWaiter(waiter.id)" class="p-2 text-neutral-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100" title="Eliminar">
-              <Trash2 :stroke-width="1.5" class="w-4 h-4" />
-            </button>
+            <div class="flex items-center gap-1">
+              <button @click="openEditDialog(waiter)" class="p-2 text-neutral-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100" title="Editar">
+                <Pencil :stroke-width="1.5" class="w-4 h-4" />
+              </button>
+              <button @click="removeWaiter(waiter.id)" class="p-2 text-neutral-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100" title="Eliminar">
+                <Trash2 :stroke-width="1.5" class="w-4 h-4" />
+              </button>
+            </div>
           </li>
         </ul>
         
@@ -171,6 +227,41 @@ const removeWaiter = async (id) => {
           <button @click="confirmAddWaiter" :disabled="!isFormValid || isSaving" class="px-4 py-2.5 text-sm font-medium text-white bg-neutral-900 hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors shadow-sm flex items-center gap-2">
             <svg v-if="isSaving" class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
             {{ isSaving ? 'Guardando...' : 'Añadir' }}
+          </button>
+        </div>
+      </div>
+    </Dialog>
+
+    <Dialog v-model:visible="isEditWaiterDialogOpen" modal header="Editar Mesero" :style="{ width: '28rem' }" :pt="{ root: { class: 'bg-white rounded-2xl shadow-xl border border-neutral-200' }, header: { class: 'p-6 pb-0' }, title: { class: 'text-xl font-semibold tracking-tight text-neutral-900' }, content: { class: 'p-6' }, mask: { class: 'bg-neutral-900/40 backdrop-blur-sm' } }">
+      <div class="flex flex-col gap-4 mt-2">
+        
+        <div class="grid grid-cols-2 gap-4">
+          <div class="flex flex-col gap-2">
+            <label class="text-sm font-medium text-neutral-700">Nombre</label>
+            <input v-model="editForm.nombre" type="text" class="w-full px-4 py-2.5 bg-neutral-50 border border-neutral-200 rounded-lg text-sm text-neutral-900 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent transition-all" placeholder="Ej. Carlos" autofocus />
+          </div>
+          <div class="flex flex-col gap-2">
+            <label class="text-sm font-medium text-neutral-700">Apellidos</label>
+            <input v-model="editForm.apellidos" type="text" class="w-full px-4 py-2.5 bg-neutral-50 border border-neutral-200 rounded-lg text-sm text-neutral-900 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent transition-all" placeholder="Ej. Pérez" />
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-2">
+          <label class="text-sm font-medium text-neutral-700">Correo Electrónico</label>
+          <input v-model="editForm.email" type="email" class="w-full px-4 py-2.5 bg-neutral-50 border border-neutral-200 rounded-lg text-sm text-neutral-900 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent transition-all" placeholder="carlos@ejemplo.com" />
+        </div>
+
+        <div class="flex flex-col gap-2">
+          <label class="text-sm font-medium text-neutral-700">Nueva Contraseña <span class="text-neutral-400 font-normal">(opcional)</span></label>
+          <input v-model="editForm.password" @keyup.enter="confirmEditWaiter" type="password" class="w-full px-4 py-2.5 bg-neutral-50 border border-neutral-200 rounded-lg text-sm text-neutral-900 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent transition-all" placeholder="Dejar en blanco para mantener actual" />
+        </div>
+
+        <div class="flex justify-end gap-3 mt-4">
+          <button @click="isEditWaiterDialogOpen = false" class="px-4 py-2.5 text-sm font-medium text-neutral-600 hover:text-neutral-900 bg-white border border-neutral-200 hover:bg-neutral-50 rounded-lg transition-colors">Cancelar</button>
+          
+          <button @click="confirmEditWaiter" :disabled="!isEditFormValid || isSaving" class="px-4 py-2.5 text-sm font-medium text-white bg-neutral-900 hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors shadow-sm flex items-center gap-2">
+            <svg v-if="isSaving" class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+            {{ isSaving ? 'Guardando...' : 'Guardar Cambios' }}
           </button>
         </div>
       </div>

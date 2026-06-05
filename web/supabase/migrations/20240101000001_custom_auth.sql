@@ -73,6 +73,18 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION update_perfil_password(
+  p_id uuid, p_password text
+) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER
+AS $$
+BEGIN
+  UPDATE perfiles
+  SET password_hash = crypt(p_password, gen_salt('bf'))
+  WHERE id = p_id;
+END;
+$$;
+
 -- 6. Update column comment
 COMMENT ON COLUMN "perfiles"."id" IS 'Identificador único del perfil (autogenerado)';
 COMMENT ON COLUMN "perfiles"."email" IS 'Email o identificador único para login';
