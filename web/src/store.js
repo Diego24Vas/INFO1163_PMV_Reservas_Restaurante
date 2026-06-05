@@ -2,6 +2,7 @@ import { reactive } from 'vue'
 import { ZonasService } from './service/zonas'
 import { MesasService } from './service/mesas'
 import { ElementosService } from './service/elementos'
+import { PerfilesService } from './service/perfiles'
 import { supabase } from './config/supabase'
 
 const dbToFrontendState = {
@@ -29,6 +30,7 @@ export const store = reactive({
   
   waiters: [],
   activeWaiterId: null,
+  activeWaiterName: '',
 
   history: [],
   
@@ -80,28 +82,14 @@ export const store = reactive({
   async loadStaff() {
     if (this.isStaffLoaded) return;
     try {
-      const res = await fetch('/api/staff');
-      if (res.ok) {
-        const data = await res.json();
-        this.waiters = data.waiters || [];
-        this.isStaffLoaded = true;
-      }
+      const data = await PerfilesService.getWaiters();
+      this.waiters = data.map(w => ({
+        id: w.id,
+        name: `${w.nombre} ${w.apellidos}`
+      }));
+      this.isStaffLoaded = true;
     } catch (e) {
-      console.error('Failed to load staff from mock API', e);
-    }
-  },
-
-  async saveStaff() {
-    try {
-      await fetch('/api/staff', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          waiters: this.waiters
-        })
-      });
-    } catch (e) {
-      console.error('Failed to save staff to mock API', e);
+      console.error('Failed to load staff from Supabase', e);
     }
   },
 

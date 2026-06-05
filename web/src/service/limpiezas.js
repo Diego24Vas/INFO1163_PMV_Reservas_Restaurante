@@ -19,6 +19,19 @@ export const LimpiezasService = {
     return data;
   },
 
+  async getPendienteByMesaId(mesaId) {
+    const { data, error } = await supabase
+      .from(TABLE_NAME)
+      .select("*")
+      .eq("mesa_id", mesaId)
+      .in("estado", ["Pendiente", "En Progreso"])
+      .order("creado_en", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  },
+
   async create(limpieza) {
     const { data, error } = await supabase
       .from(TABLE_NAME)

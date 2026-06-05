@@ -19,6 +19,19 @@ export const SesionesRegistroService = {
     return data;
   },
 
+  async getActivaByMesaId(mesaId) {
+    const { data, error } = await supabase
+      .from(TABLE_NAME)
+      .select("*")
+      .eq("mesa_id", mesaId)
+      .eq("estado", "Activa")
+      .order("inicio_ocupacion", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  },
+
   async create(sesion) {
     const { data, error } = await supabase
       .from(TABLE_NAME)

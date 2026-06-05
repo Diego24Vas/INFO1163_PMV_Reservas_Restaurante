@@ -5,6 +5,8 @@ import { store, stateConfig } from '../store'
 import NavBar from '../components/NavBar.vue'
 import { MapPin, Users, ZoomIn, ZoomOut, Maximize, Clock, CheckCircle2, XCircle, Trash2, Check, Lock, ChevronLeft, ShieldAlert, AlertTriangle } from 'lucide-vue-next'
 import Dialog from 'primevue/dialog'
+import { SesionesRegistroService } from '../service/sesiones_registro'
+import { LimpiezasService } from '../service/limpiezas'
 
 const router = useRouter()
 const canvasContainer = ref(null)
@@ -113,6 +115,7 @@ const forceChangeState = async (newState) => {
   
   const table = activeTableItem.value
   const previousAssignee = table.assignedTo || table.lockedBy
+  const previousState = table.state
   
   table.state = newState
   table.stateUpdatedAt = Date.now()
@@ -126,9 +129,48 @@ const forceChangeState = async (newState) => {
     table.mergeGroup = null
   }
   
+  // ================================================================
+  // PERSISTENCIA EN BD: sesiones_registro y limpiezas
+  // ================================================================
+  try {
+    if (newState === 'ocupada') {
+      await SesionesRegistroService.create({
+        mesa_id: table.id,
+        camarero_id: store.activeWaiterId || previousAssignee,
+        estado: 'Activa',
+        comensales_reales: table.guests || 0
+      })
+    }
+
+    if (newState === 'sucia') {
+      const sesionActiva = await SesionesRegistroService.getActivaByMesaId(table.id)
+      if (sesionActiva) {
+        await SesionesRegistroService.update(sesionActiva.id, {
+          estado: 'Finalizada',
+          fin_ocupacion: new Date().toISOString()
+        })
+      }
+      await LimpiezasService.create({
+        mesa_id: table.id,
+        estado: 'Pendiente'
+      })
+    }
+
+    if (newState === 'disponible' && previousState === 'sucia') {
+      const limpiezaPendiente = await LimpiezasService.getPendienteByMesaId(table.id)
+      if (limpiezaPendiente) {
+        await LimpiezasService.update(limpiezaPendiente.id, {
+          estado: 'Finalizada',
+          completado_en: new Date().toISOString()
+        })
+      }
+    }
+  } catch (e) {
+    console.error('Error al persistir sesion/limpieza desde Admin:', e)
+  }
+  
   await store.saveTopology()
   
-  // Guardar en el historial (pasamos el affectedWaiterId)
   await store.logEvent(
     'admin',
     'Administrador',

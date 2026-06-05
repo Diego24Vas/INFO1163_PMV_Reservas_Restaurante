@@ -1,4 +1,5 @@
 <script setup>
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { store } from '../store'
 import { UtensilsCrossed, LogOut } from 'lucide-vue-next'
@@ -13,11 +14,19 @@ const props = defineProps({
 
 const router = useRouter()
 
+const displayName = computed(() => {
+  if (store.role === 'waiter' && store.activeWaiterName) {
+    return store.activeWaiterName
+  }
+  return props.roleName
+})
+
 const logout = async () => {
   try {
     await AuthService.logout()
     store.role = null
     store.activeWaiterId = null
+    store.activeWaiterName = ''
     router.push('/')
   } catch (error) {
     console.error("Error al cerrar sesión:", error)
@@ -32,7 +41,7 @@ const logout = async () => {
         <UtensilsCrossed :stroke-width="1.5" class="w-4 h-4" />
       </div>
       <span class="font-medium tracking-tight text-neutral-900">
-        Reservas <span class="text-neutral-400 font-normal ml-1">/ {{ roleName }}</span>
+        Reservas <span class="text-neutral-400 font-normal ml-1">/ {{ displayName }}</span>
       </span>
     </div>
     <button @click="logout" class="text-sm font-medium text-neutral-500 hover:text-neutral-900 transition-colors flex items-center gap-2">

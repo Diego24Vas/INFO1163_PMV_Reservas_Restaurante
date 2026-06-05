@@ -5,6 +5,8 @@ import { store, stateConfig } from '../store'
 import NavBar from '../components/NavBar.vue'
 import { MapPin, Users, ZoomIn, ZoomOut, Maximize, Clock, CheckCircle2, XCircle, Trash2, Check, Lock, AlertTriangle, LayoutGrid, BellRing, ChevronLeft, ArrowRight, History, Combine } from 'lucide-vue-next'
 import Dialog from 'primevue/dialog'
+import { SesionesRegistroService } from '../service/sesiones_registro'
+import { LimpiezasService } from '../service/limpiezas'
 
 const router = useRouter()
 const canvasContainer = ref(null)
@@ -129,8 +131,7 @@ const totalMergeCapacity = computed(() => {
 })
 
 const waiterName = computed(() => {
-  const w = store.waiters.find(w => w.id === store.activeWaiterId)
-  return w ? w.name : 'Camarero'
+  return store.activeWaiterName || 'Camarero'
 })
 
 const getWaiterNameById = (id) => {
@@ -361,6 +362,14 @@ const changeTableState = async (newState, guests = null) => {
   }
   
   const table = currentTable
+  const previousState = table.state
+  
+  const getAffectedTables = () => {
+    if (table.mergeGroup) {
+      return activeRoom.value.tables.filter(t => t.mergeGroup === table.mergeGroup)
+    }
+    return [table]
+  }
   
   // Lógica especial para confirmar mesa fusionada
   if (newState === 'ocupada' && table.mergeGroup) {
@@ -383,7 +392,6 @@ const changeTableState = async (newState, guests = null) => {
         t.stateUpdatedAt = Date.now()
         t.lockedUntil = null
         t.lockedBy = null
-        // Mantenemos assignedTo para que el mismo waiter sea responsable de la limpieza
       }
     })
   }
@@ -413,7 +421,7 @@ const changeTableState = async (newState, guests = null) => {
   table.stateUpdatedAt = Date.now()
   
   if (newState === 'asignacion') {
-    table.lockedUntil = Date.now() + 60000 // 60 segundos desde ahora
+    table.lockedUntil = Date.now() + 60000
     table.lockedBy = store.activeWaiterId
     timeRemaining.value[table.id] = 60
     if (guests !== null) {
@@ -423,19 +431,65 @@ const changeTableState = async (newState, guests = null) => {
     table.lockedUntil = null
     table.lockedBy = null
     
-    // Asignación de propiedad de la mesa
     if (newState === 'ocupada') {
       table.assignedTo = store.activeWaiterId
     } else if (newState === 'disponible') {
       table.assignedTo = null
       table.guests = null
-      table.mergeGroup = null // Romper fusión al liberar
+      table.mergeGroup = null
     }
+  }
+
+  // ================================================================
+  // PERSISTENCIA EN BD: sesiones_registro y limpiezas
+  // ================================================================
+  try {
+    const affectedTables = getAffectedTables()
+
+    if (newState === 'ocupada') {
+      for (const t of affectedTables) {
+        await SesionesRegistroService.create({
+          mesa_id: t.id,
+          camarero_id: store.activeWaiterId,
+          estado: 'Activa',
+          comensales_reales: t.guests || guests || 0
+        })
+      }
+    }
+
+    if (newState === 'sucia') {
+      for (const t of affectedTables) {
+        const sesionActiva = await SesionesRegistroService.getActivaByMesaId(t.id)
+        if (sesionActiva) {
+          await SesionesRegistroService.update(sesionActiva.id, {
+            estado: 'Finalizada',
+            fin_ocupacion: new Date().toISOString()
+          })
+        }
+        await LimpiezasService.create({
+          mesa_id: t.id,
+          estado: 'Pendiente'
+        })
+      }
+    }
+
+    if (newState === 'disponible' && previousState === 'sucia') {
+      for (const t of affectedTables) {
+        const limpiezaPendiente = await LimpiezasService.getPendienteByMesaId(t.id)
+        if (limpiezaPendiente) {
+          await LimpiezasService.update(limpiezaPendiente.id, {
+            estado: 'Finalizada',
+            completado_en: new Date().toISOString()
+          })
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Error al persistir sesion/limpieza en BD:', e)
   }
   
   await store.saveTopology()
   
-  // Guardar en el historial
   await store.logEvent(
     store.activeWaiterId,
     waiterName.value,
