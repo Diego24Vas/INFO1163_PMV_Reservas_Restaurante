@@ -222,20 +222,15 @@ const toggleMergeMode = () => {
 
 // Modificar Lógica de click en Mesa
 const handleTableClick = (table) => {
-  // Obtener la versión más reciente de la mesa desde el store (sincronizada)
-  const latestTable = activeRoom.value?.tables.find(t => t.id === table.id)
+  // Buscar la mesa en el store actual (resistente al polling que reemplaza objetos)
+  const currentTables = activeRoom.value?.tables
+  if (!currentTables) return
+  
+  const latestTable = currentTables.find(t => t.id === table.id)
   if (!latestTable) return
   
-  // Verificar si la mesa está bloqueada por otro camarero al momento de hacer clic
-  if (latestTable.state === 'asignacion' && latestTable.lockedBy && latestTable.lockedBy !== store.activeWaiterId) {
-    const secondsLeft = Math.ceil((latestTable.lockedUntil - Date.now()) / 1000)
-    if (secondsLeft > 0) {
-      // El modal ya mostraría el mensaje de todas formas, pero esto evita procesamiento innecesario
-    }
-  }
-  
   if (isMergeMode.value) {
-    if (latestTable.state !== 'disponible') return // Solo se pueden fusionar mesas disponibles
+    if (latestTable.state !== 'disponible') return
     const index = selectedForMerge.value.findIndex(t => t.id === latestTable.id)
     if (index > -1) {
       selectedForMerge.value.splice(index, 1)
@@ -243,6 +238,17 @@ const handleTableClick = (table) => {
       selectedForMerge.value.push(latestTable)
     }
     return
+  }
+  
+  // Si está bloqueada por otro camarero, mostrar modal de solo lectura
+  if (latestTable.state === 'asignacion' && latestTable.lockedBy && latestTable.lockedBy !== store.activeWaiterId) {
+    const secondsLeft = Math.ceil((latestTable.lockedUntil - Date.now()) / 1000)
+    if (secondsLeft > 0) {
+      activeTableItem.value = latestTable
+      localTableState.value = latestTable.state
+      isActionDialogOpen.value = true
+      return
+    }
   }
   
   activeTableItem.value = latestTable
@@ -266,29 +272,36 @@ const confirmMerge = async (guests) => {
   const now = Date.now()
   const groupId = 'merge_' + Math.random().toString(36).substring(2, 9)
   
+  // Obtener referencias actuales desde el store (resistente al polling)
+  const currentTables = activeRoom.value?.tables
+  if (!currentTables) return
+  
+  const selectedIds = selectedForMerge.value.map(t => t.id)
+  const freshTables = currentTables.filter(t => selectedIds.includes(t.id))
+  if (freshTables.length < 2) return
+  
   // Procesamos la asignación de todas las mesas seleccionadas juntas
-  for (const table of selectedForMerge.value) {
+  for (const table of freshTables) {
     table.state = 'asignacion'
     table.stateUpdatedAt = now
-    table.lockedUntil = now + 60000 // 60 segundos
+    table.lockedUntil = now + 60000
     table.lockedBy = store.activeWaiterId
     table.mergeGroup = groupId
-    // Distribuimos los comensales (solo informativo/visual, guardamos el total en la primera mesa o distribuido, aquí lo ponemos en cada una para que se vea reflejado, o solo en la "principal")
-    table.guests = null // Limpiamos por si acaso
+    table.guests = null
     timeRemaining.value[table.id] = 60
   }
   
-  // Asignamos todos los comensales a la primera mesa del grupo para simplificar
-  selectedForMerge.value[0].guests = guests
+  // Asignamos todos los comensales a la primera mesa del grupo
+  freshTables[0].guests = guests
   
   await store.saveTopology()
   
-  // Guardamos evento de historial (uno por el grupo o por cada mesa)
-  const tableNumbers = selectedForMerge.value.map(t => t.number).join('+')
+  // Guardamos evento de historial
+  const tableNumbers = freshTables.map(t => t.number).join('+')
   await store.logEvent(
     store.activeWaiterId,
     waiterName.value,
-    tableNumbers, // "1+2"
+    tableNumbers,
     activeRoom.value.name,
     'asignacion'
   )

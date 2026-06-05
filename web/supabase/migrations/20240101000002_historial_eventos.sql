@@ -1,3 +1,7 @@
+-- ============================================================
+-- Migration: Add historial_eventos table
+-- ============================================================
+
 CREATE TABLE IF NOT EXISTS historial_eventos (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   waiter_id text NOT NULL,

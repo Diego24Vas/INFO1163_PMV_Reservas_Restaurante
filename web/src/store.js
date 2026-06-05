@@ -3,6 +3,7 @@ import { ZonasService } from './service/zonas'
 import { MesasService } from './service/mesas'
 import { ElementosService } from './service/elementos'
 import { PerfilesService } from './service/perfiles'
+import { HistorialService } from './service/historial'
 import { supabase } from './config/supabase'
 
 const dbToFrontendState = {
@@ -42,32 +43,34 @@ export const store = reactive({
   async loadHistory() {
     if (this.isHistoryLoaded) return;
     try {
-      const res = await fetch('/api/history');
-      if (res.ok) {
-        const data = await res.json();
-        this.history = data.history || [];
-        this.isHistoryLoaded = true;
-      }
+      const rows = await HistorialService.getAll();
+      this.history = rows.map(r => ({
+        id: r.id,
+        timestamp: new Date(r.created_at).getTime(),
+        waiterId: r.waiter_id,
+        waiterName: r.waiter_name,
+        tableNumber: r.table_number,
+        roomName: r.room_name,
+        action: r.action,
+        affectedWaiterId: r.affected_waiter_id
+      }));
+      this.isHistoryLoaded = true;
     } catch (e) {
-      console.error('Failed to load history from mock API', e);
-    }
-  },
-
-  async saveHistory() {
-    try {
-      await fetch('/api/history', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ history: this.history })
-      });
-    } catch (e) {
-      console.error('Failed to save history to mock API', e);
+      console.error('Failed to load history from Supabase', e);
     }
   },
 
   async logEvent(waiterId, waiterName, tableNumber, roomName, action, affectedWaiterId = null) {
+    await HistorialService.create({
+      waiter_id: waiterId,
+      waiter_name: waiterName,
+      table_number: String(tableNumber),
+      room_name: roomName,
+      action,
+      affected_waiter_id: affectedWaiterId
+    });
     this.history.unshift({
-      id: 'evt_' + Date.now(),
+      id: crypto.randomUUID(),
       timestamp: Date.now(),
       waiterId,
       waiterName,
@@ -76,7 +79,6 @@ export const store = reactive({
       action,
       affectedWaiterId
     });
-    await this.saveHistory();
   },
 
   async loadStaff() {
