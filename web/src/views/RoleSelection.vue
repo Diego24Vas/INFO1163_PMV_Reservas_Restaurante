@@ -92,17 +92,6 @@ const handleLogin = async () => {
           </div>
         </div>
 
-        <div class="flex items-center justify-between pt-2 pb-2">
-          <label class="flex items-center gap-2 cursor-pointer group">
-            <div class="relative flex items-center justify-center">
-              <input v-model="rememberMe" type="checkbox" class="peer appearance-none w-4 h-4 border border-neutral-300 rounded bg-white checked:bg-neutral-900 checked:border-neutral-900 focus:outline-none focus:ring-2 focus:ring-neutral-900/20 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" :disabled="isLoading">
-              <Check :stroke-width="3" class="w-3 h-3 text-white absolute pointer-events-none opacity-0 peer-checked:opacity-100 transition-opacity" />
-            </div>
-            <span class="text-sm font-medium text-neutral-600 group-hover:text-neutral-900 transition-colors">Recordar acceso</span>
-          </label>
-          <a href="#" class="text-sm font-medium text-neutral-500 hover:text-neutral-900 transition-colors">¿Olvidó su clave?</a>
-        </div>
-
         <button type="submit" class="w-full flex justify-center items-center py-2.5 px-4 text-sm font-medium text-white bg-neutral-900 hover:bg-neutral-800 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-neutral-900 transition-all disabled:opacity-70 disabled:cursor-not-allowed" :disabled="isLoading">
           <svg v-if="isLoading" class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
