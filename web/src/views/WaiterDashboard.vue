@@ -3,10 +3,11 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { store, stateConfig } from '../store'
 import NavBar from '../components/NavBar.vue'
-import { MapPin, Users, ZoomIn, ZoomOut, Maximize, Clock, CheckCircle2, XCircle, Trash2, Check, Lock, AlertTriangle, LayoutGrid, BellRing, ChevronLeft, ArrowRight, History, Combine } from 'lucide-vue-next'
+import { MapPin, Users, ZoomIn, ZoomOut, Maximize, Clock, CheckCircle2, XCircle, Trash2, Check, Lock, AlertTriangle, ShieldAlert, LayoutGrid, BellRing, ChevronLeft, ArrowRight, History, Combine } from 'lucide-vue-next'
 import Dialog from 'primevue/dialog'
 import { SesionesRegistroService } from '../service/sesiones_registro'
 import { LimpiezasService } from '../service/limpiezas'
+import { PedidosService } from '../service/pedidos'
 
 const router = useRouter()
 const canvasContainer = ref(null)
@@ -14,12 +15,17 @@ const zoomLevel = ref(1)
 
 const currentView = ref('menu') // 'menu', 'map', 'alerts', 'history'
 
+const overrideCapacity = ref(false)
+const customGuests = ref(1)
+
 // Modal de acciones y Timer
 const isActionDialogOpen = ref(false)
 const activeTableItem = ref(null)
 const localTableState = ref(null) // Para evitar glitch visual al cerrar modal
 const timeRemaining = ref({})
 const elapsedTimes = ref({}) // Para medir tiempo en ocupada/sucia
+const limboTimers = ref({}) // Para mantener estado limbo tras polling
+const inactivityNotification = ref(null) // { tableNumber, roomName, timestamp }
 let timerInterval = null
 
 // Alertas activas
@@ -68,22 +74,24 @@ onMounted(async () => {
   }, 2000)
   
   // Loop de comprobación de locks y alertas (cada segundo)
-  timerInterval = setInterval(() => {
+  timerInterval = setInterval(async () => {
     let needsSave = false
     const now = Date.now()
+    const timeoutNotifications = []
     
-    store.rooms.forEach(room => {
-      room.tables.forEach(table => {
-        // Lógica de Lock en Asignación (60s)
+    for (const room of store.rooms) {
+      for (const table of room.tables) {
+        // === FASE 1: Lock de Asignación (60s) → expira a Limbo ===
         if (table.state === 'asignacion' && table.lockedUntil) {
           const secondsLeft = Math.ceil((table.lockedUntil - now) / 1000)
           if (secondsLeft <= 0) {
-            table.state = 'disponible'
-            table.lockedUntil = null
-            table.lockedBy = null
+            table.state = 'limbo'
+            table.lockedAt = table.lockedAt || now
+            table.lockedUntil = now + 120000
             table.stateUpdatedAt = now
+            limboTimers.value[table.id] = now + 120000
             needsSave = true
-            
+
             if (activeTableItem.value && activeTableItem.value.id === table.id) {
               isActionDialogOpen.value = false
             }
@@ -92,7 +100,91 @@ onMounted(async () => {
           }
         }
 
-        // Lógica de Alertas de Tiempo (Ocupada y Sucia)
+        // === FASE 2: Limbo Protegido (120s) → expira a Disponible ===
+        if (table.state === 'limbo' && table.lockedUntil) {
+          const secondsLeft = Math.ceil((table.lockedUntil - now) / 1000)
+          if (secondsLeft <= 0) {
+            table.state = 'disponible'
+            table.lockedUntil = null
+            table.lockedBy = null
+            table.stateUpdatedAt = now
+            table.assignedTo = null
+            table.guests = null
+            table.mergeGroup = null
+            table.capacidad_override = null
+            table.lockedAt = null
+            delete limboTimers.value[table.id]
+            needsSave = true
+          } else {
+            timeRemaining.value[table.id] = secondsLeft
+          }
+        }
+
+        // === RECUPERACIÓN post-polling: si el polling trajo 'asignacion' pero estaba en limbo ===
+        if (table.state === 'asignacion' && limboTimers.value[table.id]) {
+          if (limboTimers.value[table.id] > now) {
+            table.state = 'limbo'
+            table.lockedAt = table.lockedAt || now
+            table.lockedUntil = limboTimers.value[table.id]
+          } else {
+            table.state = 'disponible'
+            table.lockedUntil = null
+            table.lockedBy = null
+            table.stateUpdatedAt = now
+            table.assignedTo = null
+            table.guests = null
+            table.mergeGroup = null
+            table.capacidad_override = null
+            table.lockedAt = null
+            delete limboTimers.value[table.id]
+            needsSave = true
+          }
+        }
+
+        // === FASE 3: Timeout General de Inactividad (15 min) ===
+        if ((table.state === 'asignacion' || table.state === 'limbo') && (table.lockedAt || table.stateUpdatedAt)) {
+          const elapsedFromCreation = now - (table.lockedAt || table.stateUpdatedAt)
+          if (elapsedFromCreation >= 900000) {
+            const tableNumber = table.number
+            const roomName = room.name || ''
+
+            // Primero cancelar la sesión activa en BD para evitar que el polling la recargue
+            try {
+              const sesionActiva = await SesionesRegistroService.getActivaByMesaId(table.id)
+              if (sesionActiva) {
+                await SesionesRegistroService.update(sesionActiva.id, {
+                  estado: 'Cancelada',
+                  fin_ocupacion: new Date().toISOString()
+                })
+              }
+            } catch (e) {
+              console.error('Error cancelando sesión por timeout:', e)
+            }
+
+            // Luego actualizar estado local
+            table.state = 'disponible'
+            table.lockedUntil = null
+            table.lockedBy = null
+            table.stateUpdatedAt = now
+            table.assignedTo = null
+            table.guests = null
+            table.mergeGroup = null
+            table.capacidad_override = null
+            table.lockedAt = null
+            delete limboTimers.value[table.id]
+            needsSave = true
+
+            timeoutNotifications.push({ tableNumber, roomName })
+            inactivityNotification.value = {
+              tableNumber,
+              roomName,
+              timestamp: now
+            }
+            setTimeout(() => { inactivityNotification.value = null }, 6000)
+          }
+        }
+
+        // === Lógica de Alertas de Tiempo (Ocupada y Sucia) ===
         if (table.state === 'ocupada' || table.state === 'sucia') {
           if (!table.stateUpdatedAt) {
             table.stateUpdatedAt = now
@@ -102,9 +194,9 @@ onMounted(async () => {
           const elapsedMinutes = Math.floor((now - table.stateUpdatedAt) / 60000)
           let isWarning = false
           
-          // Umbrales de alerta según Reglas de Negocio (RN07 y RN08)
-          // RN07: Alerta de Inactividad (>120 min)
+          // RN07: Tiempo Máximo de Ocupación (>2 horas)
           if (table.state === 'ocupada' && elapsedMinutes >= 120) isWarning = true
+          
           // RN08: Tiempo Máximo de Limpieza (>10 min)
           if (table.state === 'sucia' && elapsedMinutes >= 10) isWarning = true
           
@@ -112,10 +204,22 @@ onMounted(async () => {
         } else {
           delete elapsedTimes.value[table.id]
         }
-      })
-    })
+      }
+    }
     
-    if (needsSave) store.saveTopology()
+    if (needsSave) {
+      await store.saveTopology()
+      // Registrar eventos de timeout después de persistir
+      for (const { tableNumber, roomName } of timeoutNotifications) {
+        store.logEvent(
+          store.activeWaiterId || 'system',
+          waiterName.value || 'Sistema',
+          tableNumber,
+          roomName,
+          'timeout_inactividad'
+        )
+      }
+    }
   }, 1000)
 })
 
@@ -253,6 +357,8 @@ const handleTableClick = (table) => {
   
   activeTableItem.value = latestTable
   localTableState.value = latestTable.state || 'disponible'
+  overrideCapacity.value = false
+  customGuests.value = 1
   isActionDialogOpen.value = true
 }
 
@@ -319,6 +425,56 @@ const formatDate = (timestamp) => {
   return new Date(timestamp).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })
 }
 
+// Cancelar asignación (ocupada → disponible sin limpieza)
+const cancelAssignment = async () => {
+  if (!activeTableItem.value) return
+  const confirmacion = confirm('¿Estás seguro de que deseas cancelar esta asignación? Esta acción es irreversible y solo debe usarse si los clientes no consumieron nada.')
+  if (!confirmacion) return
+  const table = activeTableItem.value
+  const currentTable = activeRoom.value?.tables.find(t => t.id === table.id)
+  if (!currentTable) return
+
+  try {
+    const sesionActiva = await SesionesRegistroService.getActivaByMesaId(table.id)
+    if (sesionActiva) {
+      const pedidos = await PedidosService.getBySesionId(sesionActiva.id)
+      if (pedidos && pedidos.length > 0) {
+        alert('No se puede cancelar la asignación: la mesa tiene pedidos registrados. Debe pasar por limpieza.')
+        return
+      }
+      await SesionesRegistroService.update(sesionActiva.id, {
+        estado: 'Cancelada',
+        fin_ocupacion: new Date().toISOString()
+      })
+    }
+  } catch (e) {
+    console.error('Error al cancelar asignación:', e)
+    alert('Error al intentar cancelar la asignación.')
+    return
+  }
+
+  currentTable.state = 'disponible'
+  currentTable.stateUpdatedAt = Date.now()
+  currentTable.lockedUntil = null
+  currentTable.lockedBy = null
+  currentTable.assignedTo = null
+  currentTable.guests = null
+  currentTable.mergeGroup = null
+  currentTable.capacidad_override = null
+  currentTable.lockedAt = null
+
+  await store.saveTopology()
+  await store.logEvent(
+    store.activeWaiterId,
+    waiterName.value,
+    currentTable.number,
+    activeRoom.value.name,
+    'disponible'
+  )
+
+  isActionDialogOpen.value = false
+}
+
 // Extender estadía de mesa ocupada
 const canExtendStay = computed(() => {
   if (!activeTableItem.value || activeTableItem.value.state !== 'ocupada') return false
@@ -347,7 +503,7 @@ const extendStay = async () => {
 }
 
 // Lógica de Máquina de Estados
-const changeTableState = async (newState, guests = null) => {
+const changeTableState = async (newState, guests = null, override = false) => {
   if (!activeTableItem.value) return
   
   // VALIDACIÓN CRÍTICA: Verificar estado actual desde el store (sincronizado)
@@ -366,7 +522,7 @@ const changeTableState = async (newState, guests = null) => {
   
   // Si vamos a confirmar ocupación, verificar que el lock sea nuestro
   if (newState === 'ocupada') {
-    if (currentTable.state === 'asignacion' && currentTable.lockedBy && currentTable.lockedBy !== store.activeWaiterId) {
+    if ((currentTable.state === 'asignacion' || currentTable.state === 'limbo') && currentTable.lockedBy && currentTable.lockedBy !== store.activeWaiterId) {
       alert('El tiempo de asignación expiró o fue tomada por otro camarero.')
       await store.loadTopology(true)
       isActionDialogOpen.value = false
@@ -420,6 +576,8 @@ const changeTableState = async (newState, guests = null) => {
         t.assignedTo = null
         t.guests = null
         t.mergeGroup = null
+        t.capacidad_override = null
+        t.lockedAt = null
       }
     })
   }
@@ -434,6 +592,8 @@ const changeTableState = async (newState, guests = null) => {
   table.stateUpdatedAt = Date.now()
   
   if (newState === 'asignacion') {
+    table.capacidad_override = override
+    table.lockedAt = Date.now()
     table.lockedUntil = Date.now() + 60000
     table.lockedBy = store.activeWaiterId
     timeRemaining.value[table.id] = 60
@@ -450,6 +610,8 @@ const changeTableState = async (newState, guests = null) => {
       table.assignedTo = null
       table.guests = null
       table.mergeGroup = null
+      table.capacidad_override = null
+      table.lockedAt = null
     }
   }
 
@@ -465,7 +627,8 @@ const changeTableState = async (newState, guests = null) => {
           mesa_id: t.id,
           camarero_id: store.activeWaiterId,
           estado: 'Activa',
-          comensales_reales: t.guests || guests || 0
+          comensales_reales: t.guests || guests || 0,
+          capacidad_override: t.capacidad_override || false
         })
       }
     }
@@ -686,11 +849,14 @@ const stopPan = () => {
         <div v-else class="grid grid-cols-1 gap-3">
           <div v-for="evt in filteredWaiterHistory" :key="evt.id" class="bg-white border border-neutral-200 rounded-xl p-5 flex items-center justify-between shadow-sm hover:border-neutral-300 transition-colors">
             <div class="flex items-center gap-4">
-              <div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 border" :class="stateConfig[evt.action].color.split(' ').map(c => c.replace('bg-', 'bg-').replace('border-', 'border-').replace('text-', 'text-')).join(' ')">
+              <div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 border" :class="stateConfig[evt.action]?.color?.split(' ').map(c => c.replace('bg-', 'bg-').replace('border-', 'border-').replace('text-', 'text-')).join(' ') || 'bg-neutral-100 border-neutral-200 text-neutral-500'">
                 <CheckCircle2 v-if="evt.action === 'disponible'" :stroke-width="1.5" class="w-5 h-5" />
                 <Clock v-else-if="evt.action === 'asignacion'" :stroke-width="1.5" class="w-5 h-5" />
                 <Users v-else-if="evt.action === 'ocupada'" :stroke-width="1.5" class="w-5 h-5" />
-                <Trash2 v-else :stroke-width="1.5" class="w-5 h-5" />
+                <ShieldAlert v-else-if="evt.action === 'limbo'" :stroke-width="1.5" class="w-5 h-5" />
+                <Trash2 v-else-if="evt.action === 'sucia'" :stroke-width="1.5" class="w-5 h-5" />
+                <Clock v-else-if="evt.action === 'timeout_inactividad'" :stroke-width="1.5" class="w-5 h-5" />
+                <History v-else :stroke-width="1.5" class="w-5 h-5" />
               </div>
               <div>
                 <div class="flex items-center gap-2">
@@ -698,7 +864,7 @@ const stopPan = () => {
                   <span class="text-xs font-medium text-neutral-500 bg-neutral-100 px-2 py-0.5 rounded-md">{{ evt.roomName }}</span>
                 </div>
                 <div class="flex items-center gap-2 mt-0.5">
-                  <p class="text-sm text-neutral-600 font-medium">Marcada como {{ stateConfig[evt.action].label }}</p>
+                  <p class="text-sm text-neutral-600 font-medium">{{ stateConfig[evt.action]?.label || evt.action }}</p>
                   <span v-if="evt.waiterId === 'admin'" class="text-[10px] font-bold uppercase tracking-widest text-sky-700 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-md">
                     Por Administrador
                   </span>
@@ -715,6 +881,18 @@ const stopPan = () => {
       
       <!-- VISTA DE MAPA -->
       <div v-else-if="currentView === 'map'" class="flex flex-col flex-1 animate-[fadeIn_0.2s_ease-out]">
+        <!-- Notificación de liberación por inactividad -->
+        <div v-if="inactivityNotification" class="mb-4 p-4 bg-neutral-900 text-white rounded-2xl shadow-lg flex items-center justify-between animate-[fadeIn_0.3s_ease-out]">
+          <div class="flex items-center gap-3">
+            <Clock :stroke-width="1.5" class="w-5 h-5 text-neutral-400 shrink-0" />
+            <p class="text-sm font-medium">
+              Mesa <strong>{{ inactivityNotification.tableNumber }}</strong> liberada por inactividad (15 min sin actividad)
+            </p>
+          </div>
+          <button @click="inactivityNotification = null" class="text-neutral-400 hover:text-white transition-colors shrink-0 ml-4">
+            <XCircle :stroke-width="1.5" class="w-4 h-4" />
+          </button>
+        </div>
         <!-- Pestañas de Salas -->
         <div class="flex items-center justify-between gap-4 mb-4 shrink-0">
           <div v-if="store.rooms.length > 0" class="flex gap-2 overflow-x-auto pb-2 hide-scrollbar">
@@ -808,9 +986,13 @@ const stopPan = () => {
                     <Combine :stroke-width="1.5" class="w-3 h-3" />
                   </div>
                   
-                  <!-- Indicador de Tiempo (Solo Asignación) -->
-                  <div v-if="table.state === 'asignacion' && timeRemaining[table.id]" class="absolute -top-3 left-1/2 -translate-x-1/2 bg-amber-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap shadow-sm z-10 flex items-center gap-1">
-                    <Clock :stroke-width="2" class="w-3 h-3" /> {{ timeRemaining[table.id] }}s
+                  <!-- Indicador de Tiempo (Asignación y Limbo) -->
+                  <div v-if="(table.state === 'asignacion' || table.state === 'limbo') && timeRemaining[table.id]" 
+                    :class="['absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap shadow-sm z-10 flex items-center gap-1',
+                      table.state === 'limbo' ? 'bg-violet-500 text-white' : 'bg-amber-500 text-white']">
+                    <ShieldAlert v-if="table.state === 'limbo'" :stroke-width="2" class="w-3 h-3" />
+                    <Clock v-else :stroke-width="2" class="w-3 h-3" />
+                    {{ timeRemaining[table.id] }}s
                   </div>
 
                   <!-- Indicador de Tiempo (Ocupada/Sucia) -->
@@ -847,6 +1029,7 @@ const stopPan = () => {
           <div class="w-8 h-8 rounded-full bg-white/50 flex items-center justify-center shrink-0">
             <CheckCircle2 v-if="localTableState === 'disponible'" :stroke-width="1.5" class="w-5 h-5" />
             <Clock v-else-if="localTableState === 'asignacion'" :stroke-width="1.5" class="w-5 h-5" />
+            <ShieldAlert v-else-if="localTableState === 'limbo'" :stroke-width="1.5" class="w-5 h-5" />
             <Users v-else-if="localTableState === 'ocupada'" :stroke-width="1.5" class="w-5 h-5" />
             <Trash2 v-else :stroke-width="1.5" class="w-5 h-5" />
           </div>
@@ -862,21 +1045,47 @@ const stopPan = () => {
         <!-- Acciones: DISPONIBLE -->
         <template v-if="localTableState === 'disponible'">
           <p class="text-sm text-neutral-500 font-medium">¿Cuántos comensales vas a asignar a esta mesa?</p>
-          
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4">
-            <button 
-              v-for="n in activeTableItem.capacity" :key="n"
-              @click="changeTableState('asignacion', n)"
-              class="flex flex-col items-center justify-center p-3 border border-neutral-200 rounded-xl hover:border-neutral-400 hover:bg-neutral-50 transition-colors bg-white shadow-sm"
-            >
-              <Users :stroke-width="1.5" class="w-5 h-5 text-neutral-600 mb-1" />
-              <span class="text-sm font-medium text-neutral-900">{{ n }} {{ n === 1 ? 'persona' : 'personas' }}</span>
-            </button>
+
+          <div class="flex items-center gap-3 mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+            <input type="checkbox" id="override-capacity" v-model="overrideCapacity" class="w-4 h-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500" />
+            <label for="override-capacity" class="text-sm font-medium text-amber-800 cursor-pointer select-none">Exceder capacidad (Override)</label>
           </div>
 
-          <div class="flex justify-end mt-4">
-            <button @click="isActionDialogOpen = false" class="px-4 py-2.5 text-sm font-medium text-neutral-600 hover:text-neutral-900 bg-white border border-neutral-200 hover:bg-neutral-50 rounded-lg transition-colors">Cancelar</button>
+          <div v-if="overrideCapacity" class="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-xl">
+            <AlertTriangle :stroke-width="1.5" class="w-5 h-5 text-red-500 shrink-0" />
+            <p class="text-sm font-medium text-red-700">Override activo. Puedes superar la capacidad máxima de {{ activeTableItem.capacity }} personas.</p>
           </div>
+          
+          <template v-if="!overrideCapacity">
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4">
+              <button 
+                v-for="n in activeTableItem.capacity" :key="n"
+                @click="changeTableState('asignacion', n, false)"
+                class="flex flex-col items-center justify-center p-3 border border-neutral-200 rounded-xl hover:border-neutral-400 hover:bg-neutral-50 transition-colors bg-white shadow-sm"
+              >
+                <Users :stroke-width="1.5" class="w-5 h-5 text-neutral-600 mb-1" />
+                <span class="text-sm font-medium text-neutral-900">{{ n }} {{ n === 1 ? 'persona' : 'personas' }}</span>
+              </button>
+            </div>
+            <div class="flex justify-end mt-4">
+              <button @click="isActionDialogOpen = false" class="px-4 py-2.5 text-sm font-medium text-neutral-600 hover:text-neutral-900 bg-white border border-neutral-200 hover:bg-neutral-50 rounded-lg transition-colors">Cancelar</button>
+            </div>
+          </template>
+
+          <template v-else>
+            <div class="flex flex-col gap-3 mt-4">
+              <div class="flex items-center gap-3">
+                <label class="text-sm font-medium text-neutral-700">Comensales reales:</label>
+                <input v-model.number="customGuests" type="number" min="1" 
+                  class="w-24 px-3 py-2 bg-white border border-neutral-200 rounded-lg text-sm text-neutral-900 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent" />
+              </div>
+              <button @click="changeTableState('asignacion', customGuests, true)" 
+                :disabled="!customGuests || customGuests < 1"
+                class="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition-colors shadow-sm">
+                Asignar {{ customGuests }} {{ customGuests === 1 ? 'persona' : 'personas' }}
+              </button>
+            </div>
+          </template>
         </template>
 
         <!-- Acciones: EN ASIGNACION -->
@@ -910,6 +1119,39 @@ const stopPan = () => {
           </template>
         </template>
 
+        <!-- Acciones: LIMBO PROTEGIDO -->
+        <template v-else-if="localTableState === 'limbo'">
+          <template v-if="activeTableItem.lockedBy && activeTableItem.lockedBy !== store.activeWaiterId">
+            <div class="flex flex-col items-center text-center p-4 bg-neutral-50 rounded-xl border border-neutral-200 border-dashed">
+              <ShieldAlert :stroke-width="1.5" class="w-8 h-8 text-neutral-400 mb-2" />
+              <p class="text-sm font-semibold text-neutral-900">Mesa en Limbo</p>
+              <p class="text-xs text-neutral-500 mt-1">El camarero <b>{{ getWaiterNameById(activeTableItem.lockedBy) }}</b> tiene la mesa en período de protección.</p>
+            </div>
+            <div class="flex justify-end mt-2">
+              <button @click="isActionDialogOpen = false" class="px-4 py-2.5 text-sm font-medium text-neutral-600 hover:text-neutral-900 bg-white border border-neutral-200 hover:bg-neutral-50 rounded-lg transition-colors">Cerrar</button>
+            </div>
+          </template>
+          <template v-else>
+            <div class="flex flex-col items-center justify-center p-4 bg-violet-50 border border-violet-200 rounded-xl">
+              <div class="flex items-center gap-2 mb-2">
+                <ShieldAlert :stroke-width="1.5" class="w-5 h-5 text-violet-600" />
+                <p class="text-sm font-bold text-violet-800">Limbo Protegido</p>
+              </div>
+              <div class="text-4xl font-bold tracking-tighter text-violet-600 mb-1 font-mono">{{ timeRemaining[activeTableItem.id] || 0 }}s</div>
+              <p class="text-xs font-medium text-violet-500 uppercase tracking-widest">Para confirmar antes de liberar</p>
+            </div>
+            <p class="text-sm text-neutral-500 font-medium text-center mt-1">El lock de 60s expiró. Aún tienes 2 minutos para reconectar y confirmar la ocupación.</p>
+            <div class="grid grid-cols-2 gap-3 mt-4">
+              <button @click="changeTableState('disponible')" class="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-neutral-700 hover:text-neutral-900 bg-white border border-neutral-200 hover:bg-neutral-50 rounded-lg transition-colors">
+                <XCircle :stroke-width="1.5" class="w-4 h-4" /> Liberar Mesa
+              </button>
+              <button @click="changeTableState('ocupada')" class="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-violet-600 hover:bg-violet-700 rounded-lg transition-colors shadow-sm">
+                <Check :stroke-width="1.5" class="w-4 h-4" /> Confirmar Ocupación
+              </button>
+            </div>
+          </template>
+        </template>
+
         <!-- Acciones: OCUPADA -->
         <template v-else-if="localTableState === 'ocupada'">
           <template v-if="activeTableItem.assignedTo && activeTableItem.assignedTo !== store.activeWaiterId">
@@ -938,6 +1180,12 @@ const stopPan = () => {
             <div class="flex justify-end gap-3 mt-2">
               <button @click="isActionDialogOpen = false" class="px-4 py-2.5 text-sm font-medium text-neutral-600 hover:text-neutral-900 bg-white border border-neutral-200 hover:bg-neutral-50 rounded-lg transition-colors">Volver</button>
               <button @click="changeTableState('sucia')" class="px-4 py-2.5 text-sm font-medium text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition-colors shadow-sm">Marcar para Limpieza</button>
+            </div>
+            <div class="mt-4 pt-4 border-t border-neutral-100">
+              <p class="text-xs text-neutral-400 font-medium mb-2">Si el cliente se retiró sin consumir:</p>
+              <button @click="cancelAssignment" class="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-neutral-600 hover:text-rose-600 bg-neutral-50 hover:bg-rose-50 border border-neutral-200 hover:border-rose-200 rounded-lg transition-colors">
+                <XCircle :stroke-width="1.5" class="w-4 h-4" /> Cancelar Asignación
+              </button>
             </div>
           </template>
         </template>
