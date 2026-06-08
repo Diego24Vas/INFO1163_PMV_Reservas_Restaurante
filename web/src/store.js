@@ -6,6 +6,13 @@ import { PerfilesService } from './service/perfiles'
 import { HistorialService } from './service/historial'
 import { supabase } from './config/supabase'
 
+const generateId = () => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16)
+  })
+}
+
 const dbToFrontendState = {
   'Disponible': 'disponible',
   'En Asignacion': 'asignacion',
@@ -17,6 +24,7 @@ const dbToFrontendState = {
 const frontendToDbState = {
   'disponible': 'Disponible',
   'asignacion': 'En Asignacion',
+  'limbo': 'En Asignacion',
   'ocupada': 'Ocupada',
   'sucia': 'Requiere Limpieza'
 }
@@ -70,7 +78,7 @@ export const store = reactive({
       affected_waiter_id: affectedWaiterId
     });
     this.history.unshift({
-      id: crypto.randomUUID(),
+      id: generateId(),
       timestamp: Date.now(),
       waiterId,
       waiterName,
@@ -236,6 +244,7 @@ export const store = reactive({
 export const stateConfig = {
   disponible: { color: 'bg-emerald-50 border-emerald-200 text-emerald-700', label: 'Disponible', icon: 'check-circle' },
   asignacion: { color: 'bg-amber-50 border-amber-200 text-amber-700', label: 'En Asignación', icon: 'clock' },
+  limbo: { color: 'bg-violet-50 border-violet-300 text-violet-700', label: 'Limbo Protegido', icon: 'shield-alert' },
   ocupada: { color: 'bg-rose-50 border-rose-200 text-rose-700', label: 'Ocupada', icon: 'users' },
   sucia: { color: 'bg-neutral-100 border-neutral-300 text-neutral-500', label: 'Sucia / Limpieza', icon: 'trash-2' }
 }
