@@ -9,6 +9,13 @@ import {
 } from 'lucide-vue-next'
 import Dialog from 'primevue/dialog'
 
+const generateId = () => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16)
+  })
+}
+
 const router = useRouter()
 
 // Refs
@@ -170,7 +177,7 @@ const openRoomDialog = () => {
 
 const confirmAddRoom = () => {
   if (newRoomName.value && newRoomName.value.trim() !== '') {
-    const newId = crypto.randomUUID()
+    const newId = generateId()
     store.rooms.push({ id: newId, name: newRoomName.value.trim(), tables: [], elements: [] })
     store.activeRoomId = newId
     isRoomDialogOpen.value = false
@@ -209,7 +216,7 @@ const confirmAddTable = () => {
     const centerY = canvasContainer.value ? (canvasContainer.value.scrollTop + canvasContainer.value.clientHeight / 2) / zoomLevel.value : 1500
     
     activeRoom.value.tables.push({
-      id: crypto.randomUUID(),
+      id: generateId(),
       number: store.tableCounter++,
       capacity: parseInt(newTableCapacity.value),
       state: 'disponible',
@@ -231,7 +238,7 @@ const addElement = (type) => {
     const centerY = canvasContainer.value ? (canvasContainer.value.scrollTop + canvasContainer.value.clientHeight / 2) / zoomLevel.value : 1500
 
     activeRoom.value.elements.push({
-      id: crypto.randomUUID(),
+      id: generateId(),
       type: type, 
       x: Math.round(centerX - w/2),
       y: Math.round(centerY - h/2),
@@ -302,7 +309,7 @@ const duplicateItem = () => {
     if (selectedItemType.value === 'table') {
       const newItem = {
         ...selectedItem.value,
-        id: crypto.randomUUID(),
+        id: generateId(),
         number: store.tableCounter++,
         x: selectedItem.value.x + 40,
         y: selectedItem.value.y + 40
@@ -312,7 +319,7 @@ const duplicateItem = () => {
     } else {
       const newItem = {
         ...selectedItem.value,
-        id: crypto.randomUUID(),
+        id: generateId(),
         x: selectedItem.value.x + 40,
         y: selectedItem.value.y + 40
       }
