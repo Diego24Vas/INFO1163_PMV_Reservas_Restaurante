@@ -7,6 +7,7 @@ import { MapPin, Users, ZoomIn, ZoomOut, Maximize, Clock, CheckCircle2, XCircle,
 import Dialog from 'primevue/dialog'
 import { SesionesRegistroService } from '../service/sesiones_registro'
 import { LimpiezasService } from '../service/limpiezas'
+import { PedidosService } from '../service/pedidos'
 
 const router = useRouter()
 const canvasContainer = ref(null)
@@ -19,6 +20,7 @@ const activeTableItem = ref(null)
 // Tiempos y Alertas
 const timeRemaining = ref({})
 const elapsedTimes = ref({})
+const limboTimers = ref({})
 let timerInterval = null
 let pollInterval = null
 
@@ -43,6 +45,9 @@ onMounted(async () => {
       room.tables.forEach(table => {
         // Lógica visual de Asignación (60s)
         if (table.state === 'asignacion' && table.lockedUntil) {
+          const secondsLeft = Math.ceil((table.lockedUntil - now) / 1000)
+          timeRemaining.value[table.id] = Math.max(0, secondsLeft)
+        } else if (table.state === 'limbo' && table.lockedUntil) {
           const secondsLeft = Math.ceil((table.lockedUntil - now) / 1000)
           timeRemaining.value[table.id] = Math.max(0, secondsLeft)
         } else {
@@ -116,12 +121,34 @@ const forceChangeState = async (newState) => {
   const table = activeTableItem.value
   const previousAssignee = table.assignedTo || table.lockedBy
   const previousState = table.state
+
+  // Validación: si admin fuerza ocupada → disponible, verificar pedidos primero
+  if (newState === 'disponible' && previousState === 'ocupada') {
+    try {
+      const sesionActiva = await SesionesRegistroService.getActivaByMesaId(table.id)
+      if (sesionActiva) {
+        const pedidos = await PedidosService.getBySesionId(sesionActiva.id)
+        if (pedidos && pedidos.length > 0) {
+          alert('No se puede forzar la liberación: la mesa tiene pedidos registrados. Debe pasar por limpieza.')
+          return
+        }
+      }
+    } catch (e) {
+      console.error('Error al verificar pedidos desde Admin:', e)
+      return
+    }
+  }
   
   table.state = newState
   table.stateUpdatedAt = Date.now()
   
+  if (newState === 'asignacion') {
+    table.lockedAt = Date.now()
+  }
+  
   // Limpiar locks o asigaciones si el admin fuerza a disponible
   if (newState === 'disponible') {
+    table.lockedAt = null
     table.lockedUntil = null
     table.lockedBy = null
     table.assignedTo = null
@@ -165,6 +192,16 @@ const forceChangeState = async (newState) => {
         })
       }
     }
+
+    if (newState === 'disponible' && previousState === 'ocupada') {
+      const sesionActiva = await SesionesRegistroService.getActivaByMesaId(table.id)
+      if (sesionActiva) {
+        await SesionesRegistroService.update(sesionActiva.id, {
+          estado: 'Cancelada',
+          fin_ocupacion: new Date().toISOString()
+        })
+      }
+    }
   } catch (e) {
     console.error('Error al persistir sesion/limpieza desde Admin:', e)
   }
@@ -188,9 +225,10 @@ const unassignWaiter = async () => {
   table.assignedTo = null
   table.lockedBy = null
   table.lockedUntil = null
-  
-  // Si estaba en asignación, se devuelve a disponible porque perdió el camarero que le daba curso
-  if (table.state === 'asignacion') {
+  table.lockedAt = null
+
+  // Si estaba en asignación o limbo, se devuelve a disponible porque perdió el camarero que le daba curso
+  if (table.state === 'asignacion' || table.state === 'limbo') {
     table.state = 'disponible'
     table.stateUpdatedAt = Date.now()
   }
@@ -327,9 +365,13 @@ const stopPan = () => {
                      {{ getWaiterNameById(table.assignedTo || table.lockedBy).substring(0,6) }}
                   </div>
                 
-                <!-- Indicador de Tiempo (Solo Asignación) -->
-                <div v-if="table.state === 'asignacion' && timeRemaining[table.id] !== undefined" class="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-amber-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap shadow-sm z-10 flex items-center gap-1">
-                  <Clock :stroke-width="2" class="w-3 h-3" /> {{ timeRemaining[table.id] }}s
+                <!-- Indicador de Tiempo (Asignación y Limbo) -->
+                <div v-if="(table.state === 'asignacion' || table.state === 'limbo') && timeRemaining[table.id] !== undefined" 
+                  :class="['absolute -bottom-3 left-1/2 -translate-x-1/2 text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap shadow-sm z-10 flex items-center gap-1',
+                    table.state === 'limbo' ? 'bg-violet-500 text-white' : 'bg-amber-500 text-white']">
+                  <ShieldAlert v-if="table.state === 'limbo'" :stroke-width="2" class="w-3 h-3" />
+                  <Clock v-else :stroke-width="2" class="w-3 h-3" />
+                  {{ timeRemaining[table.id] }}s
                 </div>
 
                 <!-- Indicador de Tiempo (Ocupada/Sucia) -->
@@ -367,6 +409,7 @@ const stopPan = () => {
              <div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 border" :class="stateConfig[activeTableItem.state || 'disponible'].color.split(' ').map(c => c.replace('bg-', 'bg-').replace('border-', 'border-').replace('text-', 'text-')).join(' ')">
               <CheckCircle2 v-if="activeTableItem.state === 'disponible'" :stroke-width="1.5" class="w-5 h-5" />
               <Clock v-else-if="activeTableItem.state === 'asignacion'" :stroke-width="1.5" class="w-5 h-5" />
+              <ShieldAlert v-else-if="activeTableItem.state === 'limbo'" :stroke-width="1.5" class="w-5 h-5" />
               <Users v-else-if="activeTableItem.state === 'ocupada'" :stroke-width="1.5" class="w-5 h-5" />
               <Trash2 v-else :stroke-width="1.5" class="w-5 h-5" />
             </div>
@@ -403,7 +446,7 @@ const stopPan = () => {
             Forzar cambio de estado
           </p>
           <div class="grid grid-cols-2 gap-2">
-            <button @click="forceChangeState('disponible')" :disabled="activeTableItem.state === 'disponible' || activeTableItem.state === 'ocupada'" class="p-3 text-sm font-medium rounded-lg border border-neutral-200 bg-white hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2" :title="activeTableItem.state === 'ocupada' ? 'Debe pasar por limpieza primero' : ''">
+            <button @click="forceChangeState('disponible')" :disabled="activeTableItem.state === 'disponible'" class="p-3 text-sm font-medium rounded-lg border border-neutral-200 bg-white hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
               <CheckCircle2 :stroke-width="1.5" class="w-4 h-4" /> Disponible
             </button>
             <button @click="forceChangeState('asignacion')" :disabled="activeTableItem.state === 'asignacion' || activeTableItem.state === 'ocupada' || activeTableItem.state === 'sucia'" class="p-3 text-sm font-medium rounded-lg border border-neutral-200 bg-white hover:bg-amber-50 hover:text-amber-700 hover:border-amber-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
